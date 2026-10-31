@@ -1,5 +1,10 @@
-akshare
-pandas
-plotly
-backtrader
-streamlit
+# 依赖版本固定为「本地 Python 3.14.2 已完整验证通过」的组合。
+# 重要：Streamlit Community Cloud 目前仅支持 Python 3.9–3.13（不支持 3.14），
+#      部署时请在 Advanced settings 里把 Python version 选为 3.13。
+#      若某次构建因版本不可用失败，可临时去掉该行的 "==x.y.z" 让其自动选版。
+akshare==1.20.18
+pandas==3.1.0
+plotly==7.1.0
+backtrader==1.9.78.123
+streamlit==1.66.1
+numpy==2.5.4
