@@ -103,6 +103,62 @@ def fund_fetch(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.Dat
     return df[[c for c in keep if c in df.columns]]
 
 
+def _to_market_symbol(symbol: str) -> str:
+    """6 位代码 → 带市场前缀的代码（腾讯 / 新浪接口需要）。
+
+    沪市：6/9（A股）、5（ETF/LOF）→ sh；深市：0/2/3（A股）、1（ETF/LOF）→ sz。
+    已带 sh/sz 前缀的直接原样返回。
+    """
+    s = symbol.strip()
+    if len(s) == 6 and s.isdigit():
+        return f"sh{s}" if s[0] in ("6", "9", "5") else f"sz{s}"
+    return s
+
+
+def _fetch_sina(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.DataFrame:
+    """显式使用新浪数据源（股票走 stock_zh_a_daily，基金走 fund_etf_hist_sina）。
+
+    仅当用户在「数据源」中选择新浪时直接调用；默认路径仍走东财 + 限流回退。
+    注意：新浪基金接口返回全量且不复权，这里按日期切片，仅作备用源。
+    """
+    m = _to_market_symbol(symbol)
+    rename_map = {
+        "date": "日期", "open": "开盘", "close": "收盘",
+        "high": "最高", "low": "最低", "volume": "成交量",
+    }
+    keep = ["日期", "开盘", "收盘", "最高", "最低", "成交量"]
+    if is_fund(symbol):
+        raw = ak.fund_etf_hist_sina(symbol=m)
+        raw = raw.rename(columns={k: v for k, v in rename_map.items() if k in raw.columns})
+        raw["日期"] = pd.to_datetime(raw["日期"])
+        s, e = pd.to_datetime(start), pd.to_datetime(end)
+        raw = raw[(raw["日期"] >= s) & (raw["日期"] <= e)].copy()
+        return raw[[c for c in keep if c in raw.columns]]
+    df = ak.stock_zh_a_daily(symbol=m, start_date=start, end_date=end, adjust=adjust)
+    df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+    return df[[c for c in keep if c in df.columns]]
+
+
+def fetch_tx(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.DataFrame:
+    """腾讯证券日线（stock_zh_a_hist_tx）：支持 A股个股与场内 ETF，支持 qfq/hfq。
+
+    腾讯接口入参需带市场前缀（如 sh510300 / sz000001），返回英文列名，
+    这里统一成项目标准中文列，下游可视化 / 回测无需任何改动。
+    注意：不同数据源的复权因子算法不同，跨源结果不宜直接混用比较。
+    """
+    m = _to_market_symbol(symbol)
+    df = ak.stock_zh_a_hist_tx(
+        symbol=m, start_date=start, end_date=end, adjust=adjust,
+    )
+    rename_map = {
+        "date": "日期", "open": "开盘", "close": "收盘",
+        "high": "最高", "low": "最低", "volume": "成交量",
+    }
+    df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+    keep = ["日期", "开盘", "收盘", "最高", "最低", "成交量"]
+    return df[[c for c in keep if c in df.columns]]
+
+
 def add_ma(df: pd.DataFrame, windows=(5, 20)) -> pd.DataFrame:
     """基于收盘价计算 MA5 / MA20 等均线列。"""
     for w in windows:
@@ -110,18 +166,33 @@ def add_ma(df: pd.DataFrame, windows=(5, 20)) -> pd.DataFrame:
     return df
 
 
-def get_price(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.DataFrame:
+def get_price(symbol: str, start: str, end: str, adjust: str = "qfq",
+              source: str = "auto") -> pd.DataFrame:
     """取行情，带本地缓存：已下载过就直接读 CSV，避免重复联网/触发限流。
 
-    缓存文件放在 data/raw/（已被 .gitignore 忽略，不会进仓库）。
+    source 数据源选择：
+      - auto / em（默认）：东方财富（基金走 ETF 接口），限流时自动回退新浪；
+      - tx：腾讯证券日线（stock_zh_a_hist_tx）；
+      - sina：新浪日线（显式指定）。
+    缓存文件按「复权方式 + 数据源」分别存储，避免不同来源数据互相污染。
+    缓存放在 data/raw/（已被 .gitignore 忽略，不会进仓库）。
     """
     cache_dir = DATA / "raw"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    # 缓存文件名带上复权方式，避免 qfq / hfq 共用同一文件互相污染
-    path = cache_dir / f"{symbol}_{start}_{end}_{adjust}.csv"
+    # auto/em 沿用旧缓存名（{code}_{start}_{end}_{adjust}.csv），保持历史缓存可用；
+    # 其他源追加 _source 后缀，独立缓存、互不覆盖。
+    suffix = "" if source in ("auto", "em") else f"_{source}"
+    path = cache_dir / f"{symbol}_{start}_{end}_{adjust}{suffix}.csv"
     if path.exists():
         return pd.read_csv(path, encoding="utf-8-sig")
-    df = fund_fetch(symbol, start, end, adjust) if is_fund(symbol) else fetch(symbol, start, end, adjust)
+
+    if source == "tx":
+        df = fetch_tx(symbol, start, end, adjust)
+    elif source == "sina":
+        df = _fetch_sina(symbol, start, end, adjust)
+    else:  # auto / em
+        df = fund_fetch(symbol, start, end, adjust) if is_fund(symbol) else fetch(symbol, start, end, adjust)
+
     df.to_csv(path, index=False, encoding="utf-8-sig")
     return df
 

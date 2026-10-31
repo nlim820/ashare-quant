@@ -37,17 +37,25 @@ PRESETS = {
     "600900 长江电力": "600900",
 }
 
+# 数据源选择映射（侧栏显示名 → get_price 的 source 参数）
+SOURCE_LABELS = {
+    "东方财富（默认）": "auto",
+    "腾讯证券": "tx",
+    "新浪财经": "sina",
+}
+
 
 @st.cache_data(show_spinner="正在拉取行情（首次会联网）...")
-def load_data(symbol, start, end, adjust="qfq"):
+def load_data(symbol, start, end, adjust="qfq", source="auto"):
     """带缓存的行情获取（与回测共用本地缓存文件，不会重复联网）。"""
-    return get_price(symbol, start, end, adjust)
+    return get_price(symbol, start, end, adjust, source)
 
 
 @st.cache_data(show_spinner="回测中...")
-def run_backtest(symbol, start, end, fast, slow, adjust="qfq"):
+def run_backtest(symbol, start, end, fast, slow, adjust="qfq", source="auto"):
     """缓存回测结果，避免侧栏微调导致的重复计算。"""
-    return backtest_run(symbol, start, end, fast, slow, verbose=False, adjust=adjust)
+    return backtest_run(symbol, start, end, fast, slow, verbose=False,
+                        adjust=adjust, source=source)
 
 
 def main():
@@ -73,13 +81,15 @@ def main():
         if fast >= slow:
             st.warning("快线周期需小于慢线周期，请调整。")
         adjust = st.selectbox("复权方式", ["qfq", "hfq"], index=0)
+        source_label = st.selectbox("数据源", list(SOURCE_LABELS.keys()), index=0)
+        source = SOURCE_LABELS[source_label]
 
     if fast >= slow:
         st.stop()
 
     # —— 1) 拉数据 + K线 ——
     try:
-        raw = load_data(symbol, start, end, adjust)
+        raw = load_data(symbol, start, end, adjust, source)
     except Exception as e:
         st.error(f"行情获取失败：{e}（可能触发行情接口限流，请稍后重试）")
         st.stop()
@@ -90,14 +100,14 @@ def main():
     raw = add_ma(raw, windows=(fast, slow)).dropna(subset=[f"MA{fast}", f"MA{slow}"])
 
     asset_kind = "ETF基金" if is_fund(symbol) else "A股个股"
-    st.caption(f"当前标的：{symbol}（{asset_kind}）")
+    st.caption(f"当前标的：{symbol}（{asset_kind}）｜ 数据源：{source_label}｜ 复权：{adjust}")
     st.subheader(f"📊 K线 + 均线（MA{fast}/MA{slow}）")
     fig = kline_figure(raw.reset_index(), symbol, fast, slow)
     st.plotly_chart(fig, use_container_width=True)
 
     # —— 2) 回测绩效 ——
     st.subheader("🧪 双均线策略回测（对比买入持有）")
-    res = run_backtest(symbol, start, end, fast, slow, adjust)
+    res = run_backtest(symbol, start, end, fast, slow, adjust, source)
     if res is None:
         st.error("回测失败，请检查参数或稍后重试（可能触发行情限流）。")
         st.stop()
