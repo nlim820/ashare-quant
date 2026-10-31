@@ -23,6 +23,8 @@ data/reports/
 !data/raw/601318_20200101_20231231_qfq.csv
 !data/raw/600900_20200101_20231231_qfq.csv
 !data/raw/510300_20200101_20231231_qfq.csv
+!data/raw/300750_20200101_20231231_qfq.csv
+!data/raw/002594_20200101_20231231_qfq.csv
 
 # 环境
 .env

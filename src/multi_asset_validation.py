@@ -20,6 +20,12 @@
     python src/multi_asset_validation.py --start 20230101 --end 20251231 --fast 5 --slow 20
     python src/multi_asset_validation.py --symbols 600519,000001,510300
 生成报告：data/reports/multi_asset_validation.html（本地生成，不进仓库）
+
+窗口约定（重要）：
+    默认窗口 2020-01-01 ~ 2023-12-31 **与仓库内「演示种子缓存」的区间严格一致**，
+    因此即使断网、或部署在海外网络受限的环境（如 Streamlit Cloud），
+    默认参数也能直接读本地 CSV 跑通，不需要联网抓数据。
+    想跑更近的区间（如 2024–2025），用 --start / --end 覆盖即可，此时需联网取数。
 """
 from __future__ import annotations
 
@@ -34,6 +40,8 @@ from phase2_backtest import run
 from viz import kline_figure
 
 # 默认标的池：跨行业、流动性较好的大盘股 + 宽基 ETF（演示用，非推荐）
+# 注：以下 6 只均已随仓库提供 2020–2023 种子缓存（data/raw/*_20200101_20231231_qfq.csv），
+#     因此无外网环境下也能完整跑出 6 只的结果，不会被跳过。
 WATCHLIST = {
     "600519": "贵州茅台",
     "300750": "宁德时代",
@@ -42,7 +50,9 @@ WATCHLIST = {
     "600036": "招商银行",
     "510300": "沪深300ETF",
 }
-DEFAULT_START, DEFAULT_END = "20230101", "20251231"   # 近 3 年窗口（含 2024–2025 修复段）
+# 默认窗口与仓库内种子缓存区间对齐（详见模块 docstring「窗口约定」）：
+# 保证断网 / 海外网络受限环境（Streamlit Cloud）开箱可复现 6 只标的的完整报告。
+DEFAULT_START, DEFAULT_END = "20200101", "20231231"
 DEFAULT_FAST, DEFAULT_SLOW = 5, 20                    # 与项目默认 MA5/20 保持一致
 
 
