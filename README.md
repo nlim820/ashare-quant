@@ -29,19 +29,24 @@ pip install -r requirements.txt
 ```
 详见 `src/` 下各阶段脚本与根目录 `app.py`（Web 演示入口）。
 
-## Phase 1 成果：数据获取 + 可视化 (Current)
-- `src/phase1_fetch.py` —— 拉取单只 A股日线行情存 CSV（基础版，写死茅台）。
-- `src/phase1_plot.py` —— 把 CSV 画成可交互 K线图（基础版）。
-- `src/phase1_kline.py` —— **增强版工具**：命令行切换任意 A股个股或场内 ETF 基金代码，自动叠加 MA5/MA20 均线（数据层按代码前缀自动识别股票/基金并切换数据源）。
+## Phase 1 成果：数据获取 + 可视化
+- `src/phase1_kline.py` —— **主工具**：命令行切换任意 A股个股或场内 ETF 基金代码，自动叠加 MA5/MA20 均线（数据层按代码前缀自动识别股票/基金并切换数据源）。
   ```bash
   python src/phase1_kline.py --symbol 600519 --start 20230101 --end 20231231
   python src/phase1_kline.py --symbol 000001 --start 20230101 --end 20231231
   ```
   - 东方财富限流时自动回退新浪数据源（工程容错实践）。
   - 生成的图表（如 `data/kline_600519.html`）被 `.gitignore` 忽略，不进仓库。
+  - 早期写死茅台的基础版脚本（`phase1_fetch.py` / `phase1_plot.py`）已移除，功能由本工具与 `data_utils.py` 完全覆盖。
+
+### 工程特性：限流自愈（数据获取容错）
+公开行情接口（东方财富）对单 IP 有频率限制，频繁抓取会临时限流。`data_utils.py` 内置两层容错：
+- **多源回退**：股票与基金的东方财富接口被限流时，自动切换新浪数据源并统一列名，下游逻辑无感。
+- **本地缓存**：`get_price()` / `get_index()` 首次抓取后存 `data/raw/*.csv`（已被 `.gitignore` 忽略），同一「代码 + 区间」再次请求直接读缓存，从根本上避免重复联网触发限流。
+> 注意：新浪 ETF 接口仅返回全量且不复权数据，兜底时与东方财富 qfq 有细微差异，仅作限流时的临时容错。
 
 ## Phase 2 成果：双均线策略回测 (Current)
-- `src/data_utils.py` —— 抽离的公共数据层（取数 + 算均线），Phase 1/2 共用；按代码前缀自动识别 **A股个股 / 场内 ETF 基金**并切换数据源（东方财富股票/ETF 接口 + 股票限流回退新浪）。
+- `src/data_utils.py` —— 抽离的公共数据层（取数 + 算均线），Phase 1/2 共用；按代码前缀自动识别 **A股个股 / 场内 ETF 基金**并切换数据源（东方财富股票/ETF 接口，**股票与基金限流均自动回退新浪**）。
 - `src/phase2_backtest.py` —— 基于 `backtrader` 的 **MA5/MA20 双均线金叉死叉策略**回测：
   - 金叉买入、死叉清仓，`PercentSizer` 满仓、`commission` 万 5 手续费。
   - 输出三大量化指标（均按公式手动计算，并与 backtrader 内置分析器交叉验证）：
