@@ -61,7 +61,7 @@ def compute_metrics(daily_ret: pd.Series) -> dict:
 
 
 def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
-        verbose: bool = True, warmup: int = None) -> dict | None:
+        verbose: bool = True, warmup: int = None, adjust: str = "qfq") -> dict | None:
     """对单只股票跑回测；verbose=False 时只返回结果字典（供批量调用）。
 
     warmup：对齐参数。传入时，策略日收益与买入持有都截到「第 warmup 个交易
@@ -69,7 +69,7 @@ def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
     大、策略可交易起点越后移，买入持有基准口径会漂移，导致跨参数不可比）。
     """
     try:
-        raw = get_price(symbol, start, end, "qfq")
+        raw = get_price(symbol, start, end, adjust)
     except Exception as e:
         if verbose:
             print(f"   ⚠️ {symbol} 获取行情失败，跳过：{e}")

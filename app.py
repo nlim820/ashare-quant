@@ -47,7 +47,7 @@ def load_data(symbol, start, end, adjust="qfq"):
 @st.cache_data(show_spinner="回测中...")
 def run_backtest(symbol, start, end, fast, slow, adjust="qfq"):
     """缓存回测结果，避免侧栏微调导致的重复计算。"""
-    return backtest_run(symbol, start, end, fast, slow, verbose=False)
+    return backtest_run(symbol, start, end, fast, slow, verbose=False, adjust=adjust)
 
 
 def main():

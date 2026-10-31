@@ -117,7 +117,8 @@ def get_price(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.Data
     """
     cache_dir = DATA / "raw"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    path = cache_dir / f"{symbol}_{start}_{end}.csv"
+    # 缓存文件名带上复权方式，避免 qfq / hfq 共用同一文件互相污染
+    path = cache_dir / f"{symbol}_{start}_{end}_{adjust}.csv"
     if path.exists():
         return pd.read_csv(path, encoding="utf-8-sig")
     df = fund_fetch(symbol, start, end, adjust) if is_fund(symbol) else fetch(symbol, start, end, adjust)
