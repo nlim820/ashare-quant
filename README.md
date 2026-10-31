@@ -29,5 +29,16 @@ pip install -r requirements.txt
 ```
 详见各阶段 `src/` 下的脚本与 `notebooks/` 笔记。
 
+## Phase 1 成果：数据获取 + 可视化 (Current)
+- `src/phase1_fetch.py` —— 拉取单只 A股日线行情存 CSV（基础版，写死茅台）。
+- `src/phase1_plot.py` —— 把 CSV 画成可交互 K线图（基础版）。
+- `src/phase1_kline.py` —— **增强版工具**：命令行切换任意 A股代码，自动叠加 MA5/MA20 均线。
+  ```bash
+  python src/phase1_kline.py --symbol 600519 --start 20230101 --end 20231231
+  python src/phase1_kline.py --symbol 000001 --start 20230101 --end 20231231
+  ```
+  - 东方财富限流时自动回退新浪数据源（工程容错实践）。
+  - 生成的图表（如 `data/kline_600519.html`）被 `.gitignore` 忽略，不进仓库。
+
 ---
 *作者：小陆 ｜ 南京 ｜ 金融专业大三 ｜ 目标：金融专硕 + 量化简历项目*
