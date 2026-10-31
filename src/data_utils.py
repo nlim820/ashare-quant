@@ -59,17 +59,23 @@ def is_fund(symbol: str) -> bool:
     )
 
 
+def _fund_sina_symbol(symbol: str) -> str:
+    """把 6 位基金代码转成新浪格式（sh/sz + 代码）。
+
+    基金代码段：50/51/56/58 为沪市（sh），15/16/18 为深市（sz）。
+    """
+    s = symbol.strip()
+    prefix = "sh" if s.startswith("5") else "sz"
+    return f"{prefix}{s}"
+
+
 def fund_fetch(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.DataFrame:
     """拉取单只场内基金（ETF/LOF）日线行情，返回与股票同构的 DataFrame。
 
-    使用东方财富 ETF 接口；把可能出现的列名（中/英/异体）统一成项目标准列
-    「日期/开盘/收盘/最高/最低/成交量」，因此下游的 add_ma / 回测 / 画图逻辑
-    与股票完全共用，无需改动。
+    优先东方财富（支持 qfq 前复权 + 起止日期）；若被限流，自动切换新浪。
+    注意：新浪接口仅接受代码、返回全量且不复权，这里在代码内按日期切片对齐，
+    仅作限流兜底，正常情况仍走东方财富 qfq 数据。
     """
-    df = ak.fund_etf_hist_em(
-        symbol=symbol, period="daily",
-        start_date=start, end_date=end, adjust=adjust,
-    )
     rename_map = {
         "date": "日期", "日期": "日期",
         "open": "开盘", "开盘": "开盘", "开盘价": "开盘",
@@ -78,8 +84,22 @@ def fund_fetch(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.Dat
         "low": "最低", "最低": "最低",
         "volume": "成交量", "成交量": "成交量",
     }
-    df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
     keep = ["日期", "开盘", "收盘", "最高", "最低", "成交量"]
+
+    try:
+        df = ak.fund_etf_hist_em(
+            symbol=symbol, period="daily",
+            start_date=start, end_date=end, adjust=adjust,
+        )
+    except Push2RateLimitError:
+        print("   ⚠️ 东方财富基金接口被限流，自动切换新浪数据源...")
+        raw = ak.fund_etf_hist_sina(symbol=_fund_sina_symbol(symbol))
+        # 新浪：仅 symbol 入参，全量历史且不复权 → 统一列名后按日期切片
+        raw = raw.rename(columns={k: v for k, v in rename_map.items() if k in raw.columns})
+        raw["日期"] = pd.to_datetime(raw["日期"])
+        s, e = pd.to_datetime(start), pd.to_datetime(end)
+        df = raw[(raw["日期"] >= s) & (raw["日期"] <= e)].copy()
+    df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
     return df[[c for c in keep if c in df.columns]]
 
 
