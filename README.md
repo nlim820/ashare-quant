@@ -81,6 +81,16 @@ pip install -r requirements.txt
 - **样本外验证（walk-forward）**：in-sample(2020–2021) 选参 → out-of-sample(2022–2023)
   检验，观察 IS→OOS 衰减，警惕过拟合。详见 `src/phase2_deepen.py`。
 
+## 比赛素材层（Competition Prep）
+- 把本项目（Phase 2 回测框架）应用到银河证券「星耀数智 AI 模拟交易大赛」场景，作为
+  「AI 辅助投研」练兵场，产出可写进简历的素材。详见根目录 **`COMPETITION.md`**（含
+  比赛定位、AI 辅助工作流、以及**如何诚实写进简历**的话术与披露边界）。
+- `src/competition_prep.py` —— 复用 `data_utils` / `phase2_backtest` / `viz`，在跨行业
+  备选池上批量回测双均线策略，生成可演示的 HTML 报告（`data/reports/`，被忽略不进仓库）。
+  ```bash
+  python src/competition_prep.py
+  ```
+
 ## Phase 3 成果：可交互 Web 应用（面试可现场演示）
 - `app.py`（仓库根目录入口）+ `src/viz.py`（统一 K线/均线画图，Phase 1 命令行与网页共用）：
   - 侧栏选择预设股票，或手动输入任意 **A股个股 / 场内 ETF 基金**代码（如 510300） / 设置日期区间 / 调节快线·慢线周期；
