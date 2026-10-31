@@ -123,6 +123,16 @@ def main():
     verdict = "✅ 策略跑赢买入持有（年化）" if res["beat"] else "⚠️ 策略未跑赢买入持有（年化）"
     st.info(verdict + "　注：单标的单周期结果，不构成投资建议。")
 
+    # —— 2.5) 沪深300 指数基准（判断是否有真正的市场 alpha）——
+    if res.get("idx_ann") is not None:
+        st.subheader("🏛️ 沪深300 指数基准（是否有真 alpha）")
+        ic1, ic2, ic3 = st.columns(3)
+        ic1.metric("沪深300 年化", f"{res['idx_ann']*100:.2f}%")
+        ic2.metric("Beta（对沪深300）", f"{res['idx_beta']:.2f}")
+        ic3.metric("年化 Alpha（约）", f"{res['idx_alpha']*100:.2f}%")
+        st.caption("Alpha ≈ 策略年化 − Beta×指数年化（无风险利率取 0）。"
+                   "仅跑赢「同标的买入持有」不够，Alpha>0 才说明真正跑赢市场、而非靠 Beta 暴露。")
+
     # —— 3) 资金曲线 ——
     if "strat_tr" in res and "bh_tr" in res and len(res["strat_tr"]) > 1:
         st.subheader("📈 资金曲线（策略 vs 买入持有）")

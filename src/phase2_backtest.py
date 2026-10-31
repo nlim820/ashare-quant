@@ -18,7 +18,7 @@ import argparse
 import math
 import pandas as pd
 import backtrader as bt
-from data_utils import get_price, add_ma
+from data_utils import get_price, add_ma, get_index
 
 
 class DualMA(bt.Strategy):
@@ -54,7 +54,8 @@ def compute_metrics(daily_ret: pd.Series) -> dict:
     total = equity.iloc[-1] - 1.0
     n = len(daily_ret)
     ann = equity.iloc[-1] ** (252.0 / n) - 1.0
-    sharpe = daily_ret.mean() / daily_ret.std() * math.sqrt(252.0)
+    std = daily_ret.std()
+    sharpe = daily_ret.mean() / std * math.sqrt(252.0) if std and std > 0 else 0.0
     max_dd = ((equity / equity.cummax()) - 1.0).min()
     return dict(total=total, ann=ann, sharpe=sharpe, max_dd=max_dd)
 
@@ -111,6 +112,26 @@ def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
     bh = compute_metrics(bh_tr)
     bh_total = close_eval.iloc[-1] / close_eval.iloc[0] - 1.0
 
+    # —— 沪深300 指数基准：判断策略是否真有「市场 alpha」——
+    # 仅仅跑赢「同标的买入持有」不够，必须跑赢「市场」才算有 alpha。
+    # 用 CAPM 近似：alpha ≈ 策略年化 − Beta × 指数年化（无风险利率取 0）。
+    idx_ann = idx_beta = idx_alpha = None
+    try:
+        idx_df = get_index("sh000300", start, end)
+        idx_close = idx_df.set_index("日期")["收盘"]
+        idx_eval = idx_close.reindex(tr.index).dropna()
+        common = tr.index.intersection(idx_eval.index)
+        s_ret = tr.loc[common]
+        i_ret = idx_eval.loc[common].pct_change().dropna()
+        s_ret = s_ret.loc[i_ret.index]
+        if len(i_ret) > 20:
+            idx_ann = (1.0 + i_ret).prod() ** (252.0 / len(i_ret)) - 1.0
+            idx_beta = s_ret.cov(i_ret) / i_ret.var()
+            idx_alpha = strat["ann"] - idx_beta * idx_ann
+    except Exception as e:
+        if verbose:
+            print(f"   ⚠️ 指数基准获取失败，跳过：{e}")
+
     if verbose:
         print("\n" + "=" * 56)
         print(f"回测标的：{symbol} ｜ 策略：MA{fast}/{slow} 双均线交叉")
@@ -124,6 +145,10 @@ def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
         print("-" * 56)
         verdict = "策略跑赢买入持有 ✅" if strat["ann"] > bh["ann"] else "策略未跑赢买入持有 ⚠️"
         print(verdict)
+        if idx_ann is not None:
+            print(f"\n沪深300年化：{idx_ann*100:>6.2f}% ｜ Beta：{idx_beta:>5.2f} ｜ "
+                  f"年化Alpha(约)：{idx_alpha*100:>6.2f}%")
+            print("（Alpha>0 才说明真正跑赢市场，而非仅靠 Beta 暴露）")
 
     return dict(
         symbol=symbol, n=n,
@@ -134,6 +159,7 @@ def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
         beat=strat["ann"] > bh["ann"],
         strat_tr=tr,            # 策略日收益序列（评估窗口），供资金曲线展示
         bh_tr=bh_tr,             # 买入持有日收益序列
+        idx_ann=idx_ann, idx_beta=idx_beta, idx_alpha=idx_alpha,
     )
 
 

@@ -68,3 +68,25 @@ def get_price(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.Data
     df.to_csv(path, index=False, encoding="utf-8-sig")
     return df
 
+
+def get_index(symbol: str = "sh000300", start: str = "20200101",
+              end: str = "20231231") -> pd.DataFrame:
+    """取指数日线（默认沪深300 sh000300），带本地缓存。
+
+    返回含「日期 / 收盘」两列的 DataFrame，用于把策略收益与「市场基准」比较，
+    从而判断策略是否真有 alpha（跑赢个股买入持有 ≠ 跑赢市场）。
+    """
+    cache_dir = DATA / "raw"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cache_dir / f"idx_{symbol}_{start}_{end}.csv"
+    if path.exists():
+        return pd.read_csv(path, encoding="utf-8-sig")
+    idx = ak.stock_zh_index_daily(symbol=symbol)
+    idx = idx.rename(columns={"date": "日期", "close": "收盘"})
+    idx["日期"] = pd.to_datetime(idx["日期"])
+    s, e = pd.to_datetime(start), pd.to_datetime(end)
+    idx = idx[(idx["日期"] >= s) & (idx["日期"] <= e)][["日期", "收盘"]]
+    idx.to_csv(path, index=False, encoding="utf-8-sig")
+    return idx
+
+
