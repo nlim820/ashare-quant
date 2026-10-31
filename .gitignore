@@ -10,6 +10,7 @@ env/
 data/*.csv
 data/*.xlsx
 data/*.parquet
+data/*.html
 
 # 环境
 .env
