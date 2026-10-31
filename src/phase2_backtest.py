@@ -107,7 +107,8 @@ def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
         print(f"   评估窗口交易日：{n} 天")
 
     strat = compute_metrics(tr)
-    bh = compute_metrics(close_eval.pct_change().dropna())
+    bh_tr = close_eval.pct_change().dropna()
+    bh = compute_metrics(bh_tr)
     bh_total = close_eval.iloc[-1] / close_eval.iloc[0] - 1.0
 
     if verbose:
@@ -131,6 +132,8 @@ def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
         bh_total=bh_total, bh_ann=bh["ann"],
         bh_sharpe=bh["sharpe"], bh_maxdd=bh["max_dd"],
         beat=strat["ann"] > bh["ann"],
+        strat_tr=tr,            # 策略日收益序列（评估窗口），供资金曲线展示
+        bh_tr=bh_tr,             # 买入持有日收益序列
     )
 
 

@@ -12,6 +12,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from pathlib import Path
 from data_utils import fetch, add_ma
+from viz import kline_figure
 
 # 项目根目录 / data 目录（图表放这里，已被 .gitignore 忽略，不会进仓库）
 ROOT = Path(__file__).resolve().parent.parent
@@ -19,29 +20,10 @@ DATA = ROOT / "data"
 DATA.mkdir(parents=True, exist_ok=True)
 
 
-def plot(df: pd.DataFrame, symbol: str) -> Path:
-    """画 K线 + 均线，保存为 HTML，返回文件路径。"""
+def plot(df: pd.DataFrame, symbol: str, fast: int = 5, slow: int = 20) -> Path:
+    """画 K线 + 均线，保存为 HTML，返回文件路径。画图逻辑复用 viz.kline_figure。"""
+    fig = kline_figure(df, symbol, fast, slow)
     out_html = DATA / f"kline_{symbol}.html"
-
-    fig = go.Figure()
-    fig.add_trace(go.Candlestick(
-        x=df["日期"], open=df["开盘"], high=df["最高"],
-        low=df["最低"], close=df["收盘"], name="K线",
-    ))
-    for w in (5, 20):
-        fig.add_trace(go.Scatter(
-            x=df["日期"], y=df[f"MA{w}"], mode="lines",
-            name=f"MA{w}", line=dict(width=1.5),
-        ))
-
-    fig.update_layout(
-        title=f"{symbol} 日线 K线 + MA5/MA20",
-        xaxis_title="日期",
-        yaxis_title="价格（元）",
-        xaxis_rangeslider_visible=False,
-        legend=dict(orientation="h", y=1.02, x=0),
-    )
-
     fig.write_html(out_html)
     print(f"✅ 图表已保存到：{out_html}")
     return out_html
