@@ -11,7 +11,17 @@ data/*.csv
 data/*.xlsx
 data/*.parquet
 data/*.html
-data/raw/
+data/raw/*
+# 例外：保留少量「演示种子缓存」，供 Streamlit Cloud 等无外网/受限环境直接读本地数据
+!data/raw/600519_20200101_20231231_qfq.csv
+!data/raw/000001_20200101_20231231_qfq.csv
+!data/raw/600036_20200101_20231231_qfq.csv
+!data/raw/000651_20200101_20231231_qfq.csv
+!data/raw/000333_20200101_20231231_qfq.csv
+!data/raw/600276_20200101_20231231_qfq.csv
+!data/raw/601318_20200101_20231231_qfq.csv
+!data/raw/600900_20200101_20231231_qfq.csv
+!data/raw/510300_20200101_20231231_qfq.csv
 
 # 环境
 .env
