@@ -136,7 +136,11 @@ def get_index(symbol: str = "sh000300", start: str = "20200101",
     cache_dir.mkdir(parents=True, exist_ok=True)
     path = cache_dir / f"idx_{symbol}_{start}_{end}.csv"
     if path.exists():
-        return pd.read_csv(path, encoding="utf-8-sig")
+        idx = pd.read_csv(path, encoding="utf-8-sig")
+        # 缓存读取时「日期」是字符串，必须转 datetime，否则下方与行情
+        # DatetimeIndex 对齐时全部错位、沪深300 基准算不出来（仅首次联网能算）
+        idx["日期"] = pd.to_datetime(idx["日期"])
+        return idx[["日期", "收盘"]]
     idx = ak.stock_zh_index_daily(symbol=symbol)
     idx = idx.rename(columns={"date": "日期", "close": "收盘"})
     idx["日期"] = pd.to_datetime(idx["日期"])
