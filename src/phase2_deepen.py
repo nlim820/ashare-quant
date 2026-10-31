@@ -43,6 +43,8 @@ UNIVERSE = [
 GRID = [(5, 20), (5, 60), (5, 120), (10, 20), (10, 60), (10, 120), (20, 60), (20, 120)]
 
 START, END = "20200101", "20231231"
+# 所有参数组用同一评估起点：取最大慢线的预热期，避免基准口径漂移
+WARMUP = max(slow for _, slow in GRID) - 1
 
 
 def norm_cdf(z: float) -> float:
@@ -86,7 +88,7 @@ def main():
     for fast, slow in GRID:
         excess, s_ann, b_ann, s_sh, s_dd, beats = [], [], [], [], [], []
         for s in ok_symbols:
-            r = run(s, START, END, fast, slow, verbose=False)
+            r = run(s, START, END, fast, slow, verbose=False, warmup=WARMUP)
             if r is None:
                 continue
             excess.append(r["strat_ann"] - r["bh_ann"])
@@ -106,7 +108,7 @@ def main():
     print("\n📊 统计显著性检验（默认 MA5/20，超额年化 = 策略 − 持有）")
     excess_default = []
     for s in ok_symbols:
-        r = run(s, START, END, 5, 20, verbose=False)
+        r = run(s, START, END, 5, 20, verbose=False, warmup=WARMUP)
         if r is not None:
             excess_default.append(r["strat_ann"] - r["bh_ann"])
     n = len(excess_default)

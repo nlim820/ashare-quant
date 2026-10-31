@@ -60,23 +60,27 @@ def compute_metrics(daily_ret: pd.Series) -> dict:
 
 
 def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
-        verbose: bool = True) -> dict | None:
-    """对单只股票跑回测；verbose=False 时只返回结果字典（供批量调用）。"""
+        verbose: bool = True, warmup: int = None) -> dict | None:
+    """对单只股票跑回测；verbose=False 时只返回结果字典（供批量调用）。
+
+    warmup：对齐参数。传入时，策略日收益与买入持有都截到「第 warmup 个交易
+    日」为统一评估起点，使不同参数组在【完全相同】的窗口上比较（否则慢线越
+    大、策略可交易起点越后移，买入持有基准口径会漂移，导致跨参数不可比）。
+    """
     try:
-        df = get_price(symbol, start, end, "qfq")
+        raw = get_price(symbol, start, end, "qfq")
     except Exception as e:
         if verbose:
             print(f"   ⚠️ {symbol} 获取行情失败，跳过：{e}")
         return None
 
-    df["日期"] = pd.to_datetime(df["日期"])
-    df = df.sort_values("日期").set_index("日期")
-    df = add_ma(df, windows=(fast, slow)).dropna(subset=[f"MA{fast}", f"MA{slow}"])
-    if verbose:
-        print(f"   有效交易日：{len(df)} 天")
+    raw["日期"] = pd.to_datetime(raw["日期"])
+    raw = raw.sort_values("日期").set_index("日期")
+    raw = add_ma(raw, windows=(fast, slow))   # 加均线列（前导为 NaN）
 
+    # 用完整数据喂回测：策略会等自己的均线就绪后才交易（前段自动空仓）
     data = bt.feeds.PandasData(
-        dataname=df, open="开盘", high="最高", low="最低",
+        dataname=raw, open="开盘", high="最高", low="最低",
         close="收盘", volume="成交量", openinterest=-1,
     )
     cerebro = bt.Cerebro()
@@ -88,12 +92,23 @@ def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
     cerebro.addanalyzer(bt.analyzers.TimeReturn, _name="tr", timeframe=bt.TimeFrame.Days)
 
     result = cerebro.run()
-    tr = pd.Series(result[0].analyzers.tr.get_analysis())
-    strat = compute_metrics(tr)
+    tr_full = pd.Series(result[0].analyzers.tr.get_analysis())   # 全周期日收益
 
-    close = df["收盘"]
-    bh = compute_metrics(close.pct_change().dropna())
-    bh_total = close.iloc[-1] / close.iloc[0] - 1.0
+    # —— 统一评估窗口 ——
+    if warmup is not None:
+        eval_start = raw.index[warmup]
+        tr = tr_full.loc[eval_start:].dropna()
+        close_eval = raw["收盘"].loc[eval_start:]
+    else:
+        tr = tr_full.dropna()
+        close_eval = raw["收盘"]
+    n = len(tr)
+    if verbose:
+        print(f"   评估窗口交易日：{n} 天")
+
+    strat = compute_metrics(tr)
+    bh = compute_metrics(close_eval.pct_change().dropna())
+    bh_total = close_eval.iloc[-1] / close_eval.iloc[0] - 1.0
 
     if verbose:
         print("\n" + "=" * 56)
@@ -110,7 +125,7 @@ def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
         print(verdict)
 
     return dict(
-        symbol=symbol, n=len(df),
+        symbol=symbol, n=n,
         strat_total=strat["total"], strat_ann=strat["ann"],
         strat_sharpe=strat["sharpe"], strat_maxdd=strat["max_dd"],
         bh_total=bh_total, bh_ann=bh["ann"],
