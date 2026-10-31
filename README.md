@@ -81,6 +81,16 @@ pip install -r requirements.txt
 - **样本外验证（walk-forward）**：in-sample(2020–2021) 选参 → out-of-sample(2022–2023)
   检验，观察 IS→OOS 衰减，警惕过拟合。详见 `src/phase2_deepen.py`。
 
+### 多标的策略验证与可视化报告（Multi-Asset Validation）
+- `src/multi_asset_validation.py` —— 对一篮子标的批量回测**双均线择时**策略，按
+  **最大回撤（风险控制）** 排序，生成可交互 HTML 报告（排名表 + K线 + 资金曲线 + Top3 叠加）。
+- 复用 `data_utils` / `phase2_backtest` / `viz` 公共层，**不重复造轮子**；支持命令行换池 / 换参重跑：
+  ```bash
+  python src/multi_asset_validation.py
+  python src/multi_asset_validation.py --symbols 600519,000001,510300 --start 20230101 --end 20251231
+  ```
+- 结论：双均线无稳定收益 alpha，核心价值是压低回撤（详见 Phase 2 深化与样本外验证）。
+
 ## Phase 3 成果：可交互 Web 应用（面试可现场演示）
 - `app.py`（仓库根目录入口）+ `src/viz.py`（统一 K线/均线画图，Phase 1 命令行与网页共用）：
   - 侧栏选择预设股票，或手动输入任意 **A股个股 / 场内 ETF 基金**代码（如 510300） / 设置日期区间 / 调节快线·慢线周期；
