@@ -52,3 +52,19 @@ def add_ma(df: pd.DataFrame, windows=(5, 20)) -> pd.DataFrame:
     for w in windows:
         df[f"MA{w}"] = df["收盘"].rolling(window=w).mean()
     return df
+
+
+def get_price(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.DataFrame:
+    """取行情，带本地缓存：已下载过就直接读 CSV，避免重复联网/触发限流。
+
+    缓存文件放在 data/raw/（已被 .gitignore 忽略，不会进仓库）。
+    """
+    cache_dir = DATA / "raw"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    path = cache_dir / f"{symbol}_{start}_{end}.csv"
+    if path.exists():
+        return pd.read_csv(path, encoding="utf-8-sig")
+    df = fetch(symbol, start, end, adjust)
+    df.to_csv(path, index=False, encoding="utf-8-sig")
+    return df
+

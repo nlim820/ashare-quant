@@ -1,7 +1,7 @@
 """Phase 2：双均线（MA5/MA20）金叉死叉策略回测。
 
 做什么：
-- 用 backtrader 框架，把 Phase 1 算好的均线信号变成可执行的交易：
+- 用 backtrader 框架，把均线信号变成可执行的交易：
     金叉（MA5 上穿 MA20）→ 买入；死叉（MA5 下穿 MA20）→ 清仓。
 - 回测一段时间，输出三个量化核心指标：年化收益、夏普比率、最大回撤。
 - 与"买入持有（buy & hold）"对比，判断策略是否真有超额价值。
@@ -18,7 +18,7 @@ import argparse
 import math
 import pandas as pd
 import backtrader as bt
-from data_utils import fetch, add_ma
+from data_utils import get_price, add_ma
 
 
 class DualMA(bt.Strategy):
@@ -59,15 +59,22 @@ def compute_metrics(daily_ret: pd.Series) -> dict:
     return dict(total=total, ann=ann, sharpe=sharpe, max_dd=max_dd)
 
 
-def run(symbol: str, start: str, end: str, fast: int, slow: int) -> None:
-    print(f"📥 拉取 {symbol} 行情（{start}~{end}）...")
-    df = fetch(symbol, start, end, "qfq")
+def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
+        verbose: bool = True) -> dict | None:
+    """对单只股票跑回测；verbose=False 时只返回结果字典（供批量调用）。"""
+    try:
+        df = get_price(symbol, start, end, "qfq")
+    except Exception as e:
+        if verbose:
+            print(f"   ⚠️ {symbol} 获取行情失败，跳过：{e}")
+        return None
+
     df["日期"] = pd.to_datetime(df["日期"])
     df = df.sort_values("日期").set_index("日期")
     df = add_ma(df, windows=(fast, slow)).dropna(subset=[f"MA{fast}", f"MA{slow}"])
-    print(f"   有效交易日：{len(df)} 天")
+    if verbose:
+        print(f"   有效交易日：{len(df)} 天")
 
-    # ---- 1) backtrader 回测 ----
     data = bt.feeds.PandasData(
         dataname=df, open="开盘", high="最高", low="最低",
         close="收盘", volume="成交量", openinterest=-1,
@@ -79,52 +86,48 @@ def run(symbol: str, start: str, end: str, fast: int, slow: int) -> None:
     cerebro.broker.setcommission(commission=0.0005)   # 单边万 5 手续费
     cerebro.addsizer(bt.sizers.PercentSizer, percents=95)
     cerebro.addanalyzer(bt.analyzers.TimeReturn, _name="tr", timeframe=bt.TimeFrame.Days)
-    cerebro.addanalyzer(bt.analyzers.SharpeRatio_A, _name="sharpe")
-    cerebro.addanalyzer(bt.analyzers.DrawDown, _name="dd")
 
-    start_val = cerebro.broker.getvalue()
-    result = cerebro.run()[0]
-    end_val = cerebro.broker.getvalue()
-
-    tr = pd.Series(result.analyzers.tr.get_analysis())   # 每日组合收益
+    result = cerebro.run()
+    tr = pd.Series(result[0].analyzers.tr.get_analysis())
     strat = compute_metrics(tr)
-    bt_sharpe = result.analyzers.sharpe.get_analysis().get("sharperatio")
-    bt_maxdd = result.analyzers.dd.get_analysis().max.drawdown / 100.0
 
-    # ---- 2) 买入持有 对比 ----
     close = df["收盘"]
-    bh_ret = close.pct_change().dropna()
-    bh = compute_metrics(bh_ret)
+    bh = compute_metrics(close.pct_change().dropna())
     bh_total = close.iloc[-1] / close.iloc[0] - 1.0
 
-    # ---- 3) 打印报告 ----
-    print("\n" + "=" * 56)
-    print(f"回测标的：{symbol} ｜ 策略：MA{fast}/{slow} 双均线交叉")
-    print("=" * 56)
-    print(f"初始资金：{start_val:,.0f}  →  策略终值：{end_val:,.0f}")
-    print("-" * 56)
-    print(f"{'指标':<10}{'双均线策略':>16}{'买入持有':>16}")
-    print("-" * 56)
-    print(f"{'总收益':<10}{strat['total']*100:>15.2f}%{bh_total*100:>15.2f}%")
-    print(f"{'年化收益':<10}{strat['ann']*100:>15.2f}%{bh['ann']*100:>15.2f}%")
-    print(f"{'夏普比率':<10}{strat['sharpe']:>16.2f}{bh['sharpe']:>16.2f}")
-    print(f"{'最大回撤':<10}{strat['max_dd']*100:>15.2f}%{bh['max_dd']*100:>15.2f}%")
-    print("-" * 56)
-    print(f"（backtrader 内置校验：夏普≈{bt_sharpe:.2f}，最大回撤≈{bt_maxdd*100:.2f}%）")
-    print("=" * 56)
-    verdict = "策略跑赢买入持有 ✅" if strat["ann"] > bh["ann"] else "策略未跑赢买入持有 ⚠️（单标的单周期，需更多样本验证）"
-    print(verdict)
+    if verbose:
+        print("\n" + "=" * 56)
+        print(f"回测标的：{symbol} ｜ 策略：MA{fast}/{slow} 双均线交叉")
+        print("=" * 56)
+        print(f"{'指标':<10}{'双均线策略':>16}{'买入持有':>16}")
+        print("-" * 56)
+        print(f"{'总收益':<10}{strat['total']*100:>15.2f}%{bh_total*100:>15.2f}%")
+        print(f"{'年化收益':<10}{strat['ann']*100:>15.2f}%{bh['ann']*100:>15.2f}%")
+        print(f"{'夏普比率':<10}{strat['sharpe']:>16.2f}{bh['sharpe']:>16.2f}")
+        print(f"{'最大回撤':<10}{strat['max_dd']*100:>15.2f}%{bh['max_dd']*100:>15.2f}%")
+        print("-" * 56)
+        verdict = "策略跑赢买入持有 ✅" if strat["ann"] > bh["ann"] else "策略未跑赢买入持有 ⚠️"
+        print(verdict)
+
+    return dict(
+        symbol=symbol, n=len(df),
+        strat_total=strat["total"], strat_ann=strat["ann"],
+        strat_sharpe=strat["sharpe"], strat_maxdd=strat["max_dd"],
+        bh_total=bh_total, bh_ann=bh["ann"],
+        bh_sharpe=bh["sharpe"], bh_maxdd=bh["max_dd"],
+        beat=strat["ann"] > bh["ann"],
+    )
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="双均线策略回测")
+    p = argparse.ArgumentParser(description="双均线策略回测（单标的）")
     p.add_argument("--symbol", default="600519")
     p.add_argument("--start", default="20200101")
     p.add_argument("--end", default="20231231")
     p.add_argument("--fast", type=int, default=5)
     p.add_argument("--slow", type=int, default=20)
     args = p.parse_args()
-    run(args.symbol, args.start, args.end, args.fast, args.slow)
+    run(args.symbol, args.start, args.end, args.fast, args.slow, verbose=True)
 
 
 if __name__ == "__main__":
