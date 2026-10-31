@@ -3,6 +3,11 @@
 > 一个面向简历的、可增量推进的金融数据分析与量化回测项目。
 > A resume-oriented, incrementally-built financial data analysis & backtest project.
 
+**🔗 在线体验 (Live Demo)：<https://ashare-quant-zzhj4vvq7ucwiyuctmdhez.streamlit.app/>**
+
+> 无需安装，打开即可交互：选股票/ETF、调均线参数、切换复权方式，实时看 K线、回测绩效与沪深300 基准（Beta/Alpha）。
+> 预置 8 只标的在 2020–2023 区间**内置离线缓存**，即使数据接口不可用也能完整演示。
+
 ## 项目目标 (Goal)
 通过 GitHub 持续提交，复现一项能写进简历的量化/数据分析项目：
 从「数据获取 + 可视化」起步，逐步过渡到「经典策略回测」，最终封装为可演示的网页应用。
@@ -175,17 +180,23 @@ pip install -r requirements.txt
 - 缓存按「复权方式 × 数据源」隔离（如 `600519_..._qfq.csv` / `..._qfq_tx.csv`），互不污染。
 - 提示：不同数据源的复权因子算法不同，跨源结果**不宜直接混用比较**，只作交叉验证。
 
-## 在线演示部署（Streamlit Cloud）
-> `localhost:8501` 是**本机回环地址，只有本机能打开**；要发链接给别人 / 放进简历，需部署到公网。
+## 在线演示（已部署 · Streamlit Community Cloud）
+> `localhost:8501` 是**本机回环地址，只有本机能打开**；要发链接给别人 / 放进简历，必须部署到公网。
 
-1. 确保仓库已推送到 GitHub，且为**公开仓库**。
-2. 打开 https://share.streamlit.io ，用 GitHub 登录 → **New app**。
-3. 选择仓库 `nlim820/ashare-quant`、分支 `main`、入口文件 `app.py` → **Deploy**。
-4. 完成后得到 `https://<你的名字>.streamlit.app` 永久链接，可直接放进简历。
+**🔗 线上地址：<https://ashare-quant-zzhj4vvq7ucwiyuctmdhez.streamlit.app/>**
 
-- **关键**：Cloud 服务器在海外，实时抓国内行情易失败。本项目已把 9 只预置股票/ETF（2020–2023）的行情缓存（`data/raw/*_qfq.csv`）作为「种子缓存」纳入仓库，Cloud 上直接读本地即可演示这几只，无需联网。
-- 未纳入缓存的代码/区间会尝试实时抓取，海外网络下可能失败；**现场演示优先用预置股票 + 2020–2023 区间**。
-- 本地演示建议先跑 `python warm_cache.py` 预热缓存（或双击 `run_app.bat`），断网也能出图。
+维护说明（此后每次向 `main` 推送，Cloud 都会自动重新构建并部署）：
+
+- **Python 版本**：Cloud 仅支持 3.9–3.13（本项目本地用 3.14 开发），新建应用时须在
+  *Advanced settings* 里把 Python version 选为 **3.13**，否则构建失败。
+- **依赖可复现**：`requirements.txt` 已固定为本地验证通过的版本组合（akshare 1.20.18 /
+  pandas 3.1.0 / plotly 7.1.0 / backtrader 1.9.78.123 / streamlit 1.66.1）。
+- **离线可完整演示**：仓库内置 11 只标的（2020–2023）+ 沪深300 指数，共 **12 个种子缓存**。
+  Cloud 服务器在海外、实时抓国内行情易失败，但有缓存时 K线 / 回测 / Beta / Alpha 全部正常，
+  已通过「断网 socket 屏蔽」实测验证。
+- 未纳入缓存的代码或区间会尝试实时抓取，海外网络下可能失败；**演示优先用预置股票 + 2020–2023 区间**。
+- 免费版闲置会自动休眠，首次访问冷启动约 30–60 秒，属正常现象。
+- 本地演示建议先跑 `python warm_cache.py`（或双击 `run_app.bat`）预热缓存，断网也能出图。
 
 ---
 *作者：小陆 ｜ 南京 ｜ 金融专业大三 ｜ 目标：金融专硕 + 量化简历项目*
