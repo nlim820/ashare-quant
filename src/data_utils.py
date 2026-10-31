@@ -47,6 +47,42 @@ def fetch(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.DataFram
         return sina
 
 
+def is_fund(symbol: str) -> bool:
+    """判断 6 位代码是否为场内基金（ETF/LOF/封基）。
+
+    股票代码段：60/68（沪）、00/30（深）；基金代码段：50/51/56/58（沪）、
+    15/16/18（深）。用代码前缀区分，无需新增显式开关。
+    """
+    s = symbol.strip()
+    return len(s) == 6 and s.isdigit() and s[:2] in (
+        "50", "51", "56", "58", "15", "16", "18",
+    )
+
+
+def fund_fetch(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.DataFrame:
+    """拉取单只场内基金（ETF/LOF）日线行情，返回与股票同构的 DataFrame。
+
+    使用东方财富 ETF 接口；把可能出现的列名（中/英/异体）统一成项目标准列
+    「日期/开盘/收盘/最高/最低/成交量」，因此下游的 add_ma / 回测 / 画图逻辑
+    与股票完全共用，无需改动。
+    """
+    df = ak.fund_etf_hist_em(
+        symbol=symbol, period="daily",
+        start_date=start, end_date=end, adjust=adjust,
+    )
+    rename_map = {
+        "date": "日期", "日期": "日期",
+        "open": "开盘", "开盘": "开盘", "开盘价": "开盘",
+        "close": "收盘", "收盘": "收盘", "收盘价": "收盘",
+        "high": "最高", "最高": "最高",
+        "low": "最低", "最低": "最低",
+        "volume": "成交量", "成交量": "成交量",
+    }
+    df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+    keep = ["日期", "开盘", "收盘", "最高", "最低", "成交量"]
+    return df[[c for c in keep if c in df.columns]]
+
+
 def add_ma(df: pd.DataFrame, windows=(5, 20)) -> pd.DataFrame:
     """基于收盘价计算 MA5 / MA20 等均线列。"""
     for w in windows:
@@ -64,7 +100,7 @@ def get_price(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.Data
     path = cache_dir / f"{symbol}_{start}_{end}.csv"
     if path.exists():
         return pd.read_csv(path, encoding="utf-8-sig")
-    df = fetch(symbol, start, end, adjust)
+    df = fund_fetch(symbol, start, end, adjust) if is_fund(symbol) else fetch(symbol, start, end, adjust)
     df.to_csv(path, index=False, encoding="utf-8-sig")
     return df
 

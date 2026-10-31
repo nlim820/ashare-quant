@@ -32,7 +32,7 @@ pip install -r requirements.txt
 ## Phase 1 成果：数据获取 + 可视化 (Current)
 - `src/phase1_fetch.py` —— 拉取单只 A股日线行情存 CSV（基础版，写死茅台）。
 - `src/phase1_plot.py` —— 把 CSV 画成可交互 K线图（基础版）。
-- `src/phase1_kline.py` —— **增强版工具**：命令行切换任意 A股代码，自动叠加 MA5/MA20 均线。
+- `src/phase1_kline.py` —— **增强版工具**：命令行切换任意 A股个股或场内 ETF 基金代码，自动叠加 MA5/MA20 均线（数据层按代码前缀自动识别股票/基金并切换数据源）。
   ```bash
   python src/phase1_kline.py --symbol 600519 --start 20230101 --end 20231231
   python src/phase1_kline.py --symbol 000001 --start 20230101 --end 20231231
@@ -41,14 +41,15 @@ pip install -r requirements.txt
   - 生成的图表（如 `data/kline_600519.html`）被 `.gitignore` 忽略，不进仓库。
 
 ## Phase 2 成果：双均线策略回测 (Current)
-- `src/data_utils.py` —— 抽离的公共数据层（取数 + 算均线），Phase 1/2 共用。
+- `src/data_utils.py` —— 抽离的公共数据层（取数 + 算均线），Phase 1/2 共用；按代码前缀自动识别 **A股个股 / 场内 ETF 基金**并切换数据源（东方财富股票/ETF 接口 + 股票限流回退新浪）。
 - `src/phase2_backtest.py` —— 基于 `backtrader` 的 **MA5/MA20 双均线金叉死叉策略**回测：
   - 金叉买入、死叉清仓，`PercentSizer` 满仓、`commission` 万 5 手续费。
   - 输出三大量化指标（均按公式手动计算，并与 backtrader 内置分析器交叉验证）：
     **年化收益、夏普比率、最大回撤**。
   - 自动与「买入持有」对比，判断策略是否跑出超额。
   ```bash
-  python src/phase2_backtest.py --symbol 600519 --start 20200101 --end 20231231
+  python src/phase2_backtest.py --symbol 600519  --start 20200101 --end 20231231   # A股个股
+  python src/phase2_backtest.py --symbol 510300  --start 20200101 --end 20231231   # 场内 ETF 基金
   ```
 - 示例结果（茅台 2020–2023）：策略年化 19.55% / 夏普 0.99 / 回撤 -19.53%；
   买入持有年化 15.66% / 夏普 0.64 / 回撤 -47.04% —— 策略以更小回撤跑赢基准。
@@ -82,7 +83,7 @@ pip install -r requirements.txt
 
 ## Phase 3 成果：可交互 Web 应用（面试可现场演示）
 - `app.py`（仓库根目录入口）+ `src/viz.py`（统一 K线/均线画图，Phase 1 命令行与网页共用）：
-  - 侧栏选择股票 / 设置日期区间 / 调节快线·慢线周期；
+  - 侧栏选择预设股票，或手动输入任意 **A股个股 / 场内 ETF 基金**代码（如 510300） / 设置日期区间 / 调节快线·慢线周期；
   - 主区输出 **K线 + 均线图**、**双均线策略回测绩效**（年化 / 夏普 / 最大回撤，与买入持有对比）、
     **沪深300 指数基准（Beta / 年化 Alpha）**、**策略 vs 买入持有资金曲线**；
   - 行情带本地缓存、回测结果带 Streamlit 缓存，交互流畅。

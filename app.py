@@ -21,7 +21,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-from data_utils import get_price, add_ma
+from data_utils import get_price, add_ma, is_fund
 from viz import kline_figure
 from phase2_backtest import run as backtest_run
 
@@ -60,7 +60,7 @@ def main():
         st.header("⚙️ 参数设置")
         choice = st.selectbox("选择股票", list(PRESETS.keys()))
         symbol = PRESETS[choice]
-        custom = st.text_input("或手动输入代码（覆盖上方）", "")
+        custom = st.text_input("或手动输入代码（A股6位 / ETF基金6位，如 510300）", "")
         if custom.strip():
             symbol = custom.strip()
         col1, col2 = st.columns(2)
@@ -89,6 +89,8 @@ def main():
     raw = raw.sort_values("日期").set_index("日期")
     raw = add_ma(raw, windows=(fast, slow)).dropna(subset=[f"MA{fast}", f"MA{slow}"])
 
+    asset_kind = "ETF基金" if is_fund(symbol) else "A股个股"
+    st.caption(f"当前标的：{symbol}（{asset_kind}）")
     st.subheader(f"📊 K线 + 均线（MA{fast}/MA{slow}）")
     fig = kline_figure(raw.reset_index(), symbol, fast, slow)
     st.plotly_chart(fig, use_container_width=True)
