@@ -31,8 +31,11 @@ def plot() -> None:
     )
 
     fig.write_html(OUT_HTML)   # 保存为网页，方便分享/写进简历
-    fig.show()                 # 在浏览器打开交互图
     print(f"✅ K线图已保存到：{OUT_HTML}")
+    try:
+        fig.show()             # 在浏览器打开交互图（无桌面环境时自动跳过）
+    except Exception:
+        print("提示：当前环境无法自动打开浏览器，直接用浏览器打开上面的 HTML 文件即可。")
 
 
 if __name__ == "__main__":
