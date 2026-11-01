@@ -110,7 +110,8 @@ def compute_metrics(daily_ret: pd.Series) -> dict:
 
 def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
         verbose: bool = True, warmup: int = None, adjust: str = "qfq",
-        source: str = "auto", filter_ma: int = None) -> dict | None:
+        source: str = "auto", filter_ma: int = None,
+        eval_start: str = None) -> dict | None:
     """对单只股票跑回测；verbose=False 时只返回结果字典（供批量调用）。
 
     warmup：对齐参数。传入时，策略日收益与买入持有都截到「第 warmup 个交易
@@ -119,6 +120,11 @@ def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
 
     filter_ma：趋势过滤线周期（如 240）。启用时评估窗口会自动后移到
     max(warmup, filter_ma)，保证过滤线就绪后才开始比较，否则窗口不一致。
+
+    eval_start：样本外检验专用。传入具体日期（如 "20240101"）时，数据仍从
+    start 拉取（提供历史均线预热），但【评估窗口与指数基准】都从该日期起算。
+    这样可用 2020-2023 作历史预热、2024 起作样本外，模拟"带训练期参数直接
+    应用到新数据"的真实场景。eval_start 与 warmup 互斥：传 eval_start 时以它为准。
     """
     try:
         raw = get_price(symbol, start, end, adjust, source)
@@ -131,12 +137,25 @@ def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
     raw = raw.sort_values("日期").set_index("日期")
     raw = add_ma(raw, windows=(fast, slow))   # 加均线列（前导为 NaN）
 
-    # 统一评估起点：过滤线周期更长，必须后移到 max(warmup, filter_ma)，
-    # 否则过滤线还没就绪就开始比较，结论会失真。
-    eff_warmup = warmup
-    if filter_ma:
-        eff_warmup = max(eff_warmup if eff_warmup is not None else 0, filter_ma)
-    start_bar = eff_warmup if eff_warmup is not None else 0
+    # 统一评估起点：既支持 warmup（第 N 个交易日），也支持 eval_start（具体日期）。
+    # 两者互斥：传 eval_start 时以它为准（用于样本外检验）。
+    if eval_start is not None:
+        # 样本外：数据从 start 拉全量（历史预热），评估从 eval_start 起
+        es_dt = pd.Timestamp(eval_start)
+        if es_dt in raw.index:
+            start_bar = raw.index.get_loc(es_dt)
+        else:
+            after = raw.index[raw.index >= es_dt]
+            start_bar = raw.index.get_loc(after[0]) if len(after) else len(raw) - 1
+        # 过滤线比评估起点还长时，须进一步后移，保证过滤线就绪
+        if filter_ma and filter_ma > start_bar:
+            start_bar = filter_ma
+    else:
+        eff_warmup = warmup
+        if filter_ma:
+            eff_warmup = max(eff_warmup if eff_warmup is not None else 0, filter_ma)
+        start_bar = eff_warmup if eff_warmup is not None else 0
+    eval_start_date = raw.index[start_bar] if start_bar > 0 else raw.index[0]
 
     # 用完整数据喂回测：策略会等自己的均线就绪后才交易（前段自动空仓）
     data = bt.feeds.PandasData(
@@ -155,17 +174,13 @@ def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
     result = cerebro.run()
     tr_full = pd.Series(result[0].analyzers.tr.get_analysis())   # 全周期日收益
 
-    # —— 统一评估窗口 ——
-    if eff_warmup is not None:
-        eval_start = raw.index[eff_warmup]
-        tr = tr_full.loc[eval_start:].dropna()
-        close_eval = raw["收盘"].loc[eval_start:]
-    else:
-        tr = tr_full.dropna()
-        close_eval = raw["收盘"]
+    # —— 统一评估窗口（基于上面算出的 eval_start_date）——
+    tr = tr_full.loc[eval_start_date:].dropna()
+    close_eval = raw["收盘"].loc[eval_start_date:]
     n = len(tr)
     if verbose:
-        print(f"   评估窗口交易日：{n} 天")
+        es_note = f" ｜ 评估起点 {eval_start_date.date()}" if eval_start else ""
+        print(f"   评估窗口交易日：{n} 天{es_note}")
 
     strat = compute_metrics(tr)
     bh_tr = close_eval.pct_change().dropna()
@@ -182,7 +197,7 @@ def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
     # 用 CAPM 近似：alpha ≈ 策略年化 − Beta × 指数年化（无风险利率取 0）。
     idx_ann = idx_beta = idx_alpha = None
     try:
-        idx_df = get_index("sh000300", start, end)
+        idx_df = get_index("sh000300", eval_start_date.strftime("%Y%m%d"), end)
         idx_close = idx_df.set_index("日期")["收盘"]
         idx_eval = idx_close.reindex(tr.index).dropna()
         common = tr.index.intersection(idx_eval.index)
