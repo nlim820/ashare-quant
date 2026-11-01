@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>双均线 · 240 趋势过滤「安检门」动画</title>
+<style>
+  :root{
+    --bg0:#0a0e27; --bg1:#161b3a; --panel:rgba(255,255,255,.06);
+    --cyan:#4fd1c5; --gold:#f6c453; --purple:#b794f4; --pink:#f687b3;
+    --green:#48bb78; --red:#f56565; --txt:#e6ecff; --sub:#9aa6d6;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; padding:0; height:100%;}
+  body{
+    font-family:-apple-system,"PingFang SC","Microsoft YaHei",Segoe UI,Roboto,sans-serif;
+    color:var(--txt);
+    background:radial-gradient(1200px 800px at 70% -10%, #20305c 0%, var(--bg1) 40%, var(--bg0) 100%);
+    min-height:100vh; padding:14px; display:flex; flex-direction:column; gap:12px;
+  }
+  h1{font-size:17px; margin:0; font-weight:700; letter-spacing:.5px;}
+  h1 small{font-weight:400; color:var(--sub); font-size:12px; display:block; margin-top:3px;}
+  .panel{
+    background:var(--panel); border:1px solid rgba(255,255,255,.08);
+    border-radius:14px; padding:12px; backdrop-filter:blur(8px);
+  }
+  .controls{display:flex; flex-wrap:wrap; gap:10px 14px; align-items:flex-end;}
+  .field{display:flex; flex-direction:column; gap:4px;}
+  .field label{font-size:11px; color:var(--sub);}
+  .field input[type=text]{
+    width:120px; padding:7px 9px; border-radius:9px; border:1px solid rgba(255,255,255,.14);
+    background:rgba(0,0,0,.25); color:var(--txt); font-size:13px; outline:none;
+  }
+  .field input[type=number]{
+    width:64px; padding:7px 9px; border-radius:9px; border:1px solid rgba(255,255,255,.14);
+    background:rgba(0,0,0,.25); color:var(--txt); font-size:13px; outline:none;
+  }
+  .chk{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--sub); padding-bottom:7px;}
+  .chk input{width:16px; height:16px; accent-color:var(--pink);}
+  button{
+    padding:9px 16px; border:none; border-radius:10px; font-size:13px; font-weight:600;
+    cursor:pointer; color:#0a0e27; background:linear-gradient(135deg,var(--cyan),#63e6be);
+    transition:transform .1s, filter .15s;
+  }
+  button:hover{filter:brightness(1.08);}
+  button:active{transform:scale(.97);}
+  button.ghost{background:rgba(255,255,255,.1); color:var(--txt);}
+  .canvas-wrap{position:relative; width:100%;}
+  canvas{width:100%; height:auto; display:block; border-radius:14px;
+    background:linear-gradient(160deg,#0c1230,#10183a 60%,#0a0e27);
+    border:1px solid rgba(255,255,255,.08);}
+  .status{display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; font-size:13px;}
+  .pill{padding:4px 10px; border-radius:999px; font-size:12px; font-weight:600;}
+  .pill.open{background:rgba(72,187,120,.18); color:var(--green); border:1px solid rgba(72,187,120,.4);}
+  .pill.block{background:rgba(246,135,179,.18); color:var(--pink); border:1px solid rgba(246,135,179,.4);}
+  .pill.idle{background:rgba(154,166,214,.15); color:var(--sub); border:1px solid rgba(154,166,214,.3);}
+  .bubble{min-height:18px; font-size:13px; color:var(--sub); margin-left:auto;}
+  .stats{display:flex; flex-wrap:wrap; gap:10px; font-size:12px; color:var(--sub);}
+  .stats b{color:var(--txt); font-weight:700;}
+  .legend{display:flex; flex-wrap:wrap; gap:12px; font-size:11px; color:var(--sub); margin-top:6px;}
+  .legend i{display:inline-block; width:14px; height:3px; border-radius:2px; vertical-align:middle; margin-right:5px;}
+  .timeline-label{font-size:11px; color:var(--sub); margin-bottom:4px;}
+  .err{color:var(--red); font-size:13px;}
+  .foot{font-size:11px; color:var(--sub); text-align:center; line-height:1.6;}
+  .foot code{background:rgba(255,255,255,.08); padding:1px 6px; border-radius:5px; color:var(--cyan);}
+</style>
+</head>
+<body>
+  <h1>双均线 · 240 日均线趋势过滤「安检门」动画
+    <small>输入任意 A 股 / ETF 代码 → 现场拉取真实行情 → 演示金叉买入、死叉清仓、趋势过滤如何拦掉假信号</small>
+  </h1>
+
+  <div class="panel controls">
+    <div class="field">
+      <label>股票 / ETF 代码</label>
+      <input id="code" type="text" value="600519" placeholder="如 600519 / 300750" />
+    </div>
+    <div class="field">
+      <label>起始日期</label>
+      <input id="start" type="text" value="20200101" />
+    </div>
+    <div class="field">
+      <label>结束日期</label>
+      <input id="end" type="text" value="20261101" />
+    </div>
+    <div class="field">
+      <label>快线 MA</label>
+      <input id="fast" type="number" value="5" min="2" max="120" />
+    </div>
+    <div class="field">
+      <label>慢线 MA</label>
+      <input id="slow" type="number" value="20" min="3" max="250" />
+    </div>
+    <div class="field">
+      <label>过滤线 MA</label>
+      <input id="filt" type="number" value="240" min="20" max="500" />
+    </div>
+    <label class="chk"><input id="useFilt" type="checkbox" checked /> 启用安检门（门控式趋势过滤）</label>
+    <button id="loadBtn">加载并播放</button>
+    <button id="replayBtn" class="ghost">重播</button>
+  </div>
+
+  <div class="panel">
+    <div class="status">
+      <span id="datePill" class="pill idle">—</span>
+      <span id="gatePill" class="pill idle">安检门：—</span>
+      <span id="posPill" class="pill idle">持仓：—</span>
+      <span id="bubble" class="bubble">输入代码后点击「加载并播放」。</span>
+    </div>
+    <div class="canvas-wrap" style="margin-top:10px;">
+      <canvas id="cv"></canvas>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--cyan)"></i>价格（收盘）</span>
+      <span><i style="background:var(--gold)"></i>快线 MA</span>
+      <span><i style="background:var(--purple)"></i>慢线 MA</span>
+      <span><i style="background:var(--pink)"></i>长期趋势线（安检门）</span>
+      <span><i style="background:var(--green)"></i>金叉·买入</span>
+      <span><i style="background:var(--red)"></i>死叉·清仓</span>
+      <span><i style="background:var(--pink)"></i>金叉·被拦截</span>
+    </div>
+    <div class="stats" style="margin-top:10px;">
+      <span>金叉通过：<b id="sPass">0</b></span>
+      <span>金叉拦截：<b id="sBlock">0</b></span>
+      <span>死叉清仓：<b id="sDeath">0</b></span>
+      <span>持仓占比：<b id="sHold">0%</b></span>
+    </div>
+    <div class="timeline-label" style="margin-top:10px;">持仓时间轴（绿=持仓，灰=空仓）：</div>
+    <canvas id="tl" style="height:26px;"></canvas>
+  </div>
+
+  <div class="foot">
+    数据来源：akshare（东财/新浪/腾讯 多源回退），复用 <code>ashare_quant</code> 项目数据层 ·
+    趋势过滤逻辑与回测/样本外检验完全一致 · 本页为原理可视化，不构成投资建议
+  </div>
+
+<script>
+"use strict";
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+const tl = document.getElementById("tl");
+const tlc = tl.getContext("2d");
+
+// 颜色
+const C = { cyan:"#4fd1c5", gold:"#f6c453", purple:"#b794f4", pink:"#f687b3",
+  green:"#48bb78", red:"#f56565", sub:"#9aa6d6", grid:"rgba(255,255,255,.06)" };
+
+let DATA = null;        // {dates, price}
+let MAF=[], MAS=[], MAFILT=[];
+let SIGNALS=[];         // {i,type:'gold'|'death',passed}
+let HOLD=[];            // 每天是否持仓
+let N=0;
+let progress=0, playing=false, lastT=0, rafId=0;
+let W=900, H=460, dpr=1;
+
+// ---------- 工具 ----------
+function sma(arr, w){
+  const out = new Array(arr.length).fill(null);
+  let sum=0;
+  for(let i=0;i<arr.length;i++){
+    sum += arr[i];
+    if(i>=w) sum -= arr[i-w];
+    if(i>=w-1) out[i] = sum/w;
+  }
+  return out;
+}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v));}
+
+function scan(){
+  MAF = sma(DATA.price, +document.getElementById("fast").value);
+  MAS = sma(DATA.price, +document.getElementById("slow").value);
+  const fv = +document.getElementById("filt").value;
+  MAFILT = sma(DATA.price, fv);
+  const useF = document.getElementById("useFilt").checked;
+  SIGNALS = []; HOLD = new Array(N).fill(false);
+  for(let i=1;i<N;i++){
+    if(MAF[i-1]!=null && MAS[i-1]!=null && MAF[i]!=null && MAS[i]!=null){
+      if(MAF[i-1]<=MAS[i-1] && MAF[i]>MAS[i]){
+        const passed = !useF || (MAFILT[i]!=null && DATA.price[i] > MAFILT[i]);
+        SIGNALS.push({i, type:"gold", passed});
+      } else if(MAF[i-1]>=MAS[i-1] && MAF[i]<MAS[i]){
+        SIGNALS.push({i, type:"death"});
+      }
+    }
+  }
+  // 回放持仓状态
+  let holding=false, cur=0;
+  for(const s of SIGNALS){
+    while(cur<=s.i){ HOLD[cur]=holding; cur++; }
+    if(s.type==="gold" && s.passed) holding=true;
+    else if(s.type==="death") holding=false;
+  }
+  while(cur<N){ HOLD[cur]=holding; cur++; }
+  // 统计
+  const pass = SIGNALS.filter(s=>s.type==="gold"&&s.passed).length;
+  const block = SIGNALS.filter(s=>s.type==="gold"&&!s.passed).length;
+  const death = SIGNALS.filter(s=>s.type==="death").length;
+  const holdDays = HOLD.filter(Boolean).length;
+  document.getElementById("sPass").textContent = pass;
+  document.getElementById("sBlock").textContent = block;
+  document.getElementById("sDeath").textContent = death;
+  document.getElementById("sHold").textContent = N? Math.round(holdDays/N*100)+"%" : "0%";
+}
+
+// ---------- 坐标 ----------
+function priceRange(){
+  let mn=Infinity, mx=-Infinity;
+  for(let i=0;i<N;i++){
+    const v=DATA.price[i]; if(v<mn)mn=v; if(v>mx)mx=v;
+    for(const m of [MAF[i],MAS[i],MAFILT[i]]) if(m!=null){ if(m<mn)mn=m; if(m>mx)mx=m; }
+  }
+  const pad=(mx-mn)*0.08||1; return [mn-pad, mx+pad];
+}
+const PADL=8, PADR=8, PADT=14, PADB=14;
+function X(i){ return PADL + (N<=1?0:i/(N-1))*(W-PADL-PADR); }
+function Y(v,r){ return H-PADB - (v-r[0])/(r[1]-r[0])*(H-PADT-PADB); }
+
+// ---------- 绘制 ----------
+function drawTimeline(){
+  const tw=tl.clientWidth, th=tl.clientHeight;
+  tlc.clearRect(0,0,tw,th);
+  if(!N) return;
+  const bw = tw/N;
+  for(let i=0;i<N;i++){
+    tlc.fillStyle = HOLD[i] ? "rgba(72,187,120,.85)" : "rgba(154,166,214,.22)";
+    tlc.fillRect(i*bw, 2, Math.max(bw,1), th-4);
+  }
+  // 播放游标
+  const cx = X(clamp(Math.floor(progress),0,N-1)) * (tw/W);
+  tlc.fillStyle = "rgba(255,255,255,.9)";
+  tlc.fillRect(cx-0.5, 0, 1.5, th);
+}
+
+function draw(){
+  if(!DATA) return;
+  const r = priceRange();
+  ctx.clearRect(0,0,W,H);
+
+  // 网格
+  ctx.strokeStyle=C.grid; ctx.lineWidth=1;
+  for(let g=1;g<5;g++){ const y=PADT+(H-PADT-PADB)*g/5; ctx.beginPath(); ctx.moveTo(PADL,y); ctx.lineTo(W-PADR,y); ctx.stroke(); }
+
+  const idx = clamp(Math.floor(progress), 0, N-1);
+
+  // 价格线（柔光）
+  function line(arr, color, width, dash){
+    ctx.save();
+    ctx.setLineDash(dash||[]);
+    ctx.strokeStyle=color; ctx.lineWidth=width; ctx.shadowColor=color; ctx.shadowBlur=8;
+    ctx.beginPath(); let started=false;
+    for(let i=0;i<=idx;i++){ if(arr[i]==null) continue; const x=X(i),y=Y(arr[i],r);
+      if(!started){ctx.moveTo(x,y);started=true;} else ctx.lineTo(x,y); }
+    ctx.stroke(); ctx.restore();
+  }
+  line(MAFILT, C.pink, 1.4, [6,6]);
+  line(MAS, C.purple, 1.6);
+  line(MAF, C.gold, 1.6);
+  line(DATA.price, C.cyan, 2.0);
+
+  // 信号
+  const ripLife = 16;
+  for(const s of SIGNALS){
+    if(s.i>idx) continue;
+    const age = idx - s.i;
+    const x=X(s.i), y=Y(DATA.price[s.i], r);
+    if(s.type==="death"){
+      ctx.save(); ctx.shadowColor=C.red; ctx.shadowBlur=10;
+      ctx.strokeStyle=C.red; ctx.lineWidth=2;
+      const a=clamp(1-age/ripLife,0,1); ctx.globalAlpha=a;
+      ctx.beginPath(); ctx.moveTo(x-5,y-5); ctx.lineTo(x+5,y+5); ctx.moveTo(x+5,y-5); ctx.lineTo(x-5,y+5); ctx.stroke();
+      ctx.restore();
+    } else if(s.passed){
+      // 绿点 + 涟漪
+      ctx.save(); ctx.fillStyle=C.green; ctx.shadowColor=C.green; ctx.shadowBlur=10;
+      ctx.beginPath(); ctx.arc(x,y,3.5,0,7); ctx.fill();
+      if(age<ripLife){ ctx.globalAlpha=clamp(1-age/ripLife,0,1); ctx.strokeStyle=C.green; ctx.lineWidth=1.5;
+        ctx.beginPath(); ctx.arc(x,y,4+age*1.8,0,7); ctx.stroke(); }
+      ctx.restore();
+    } else {
+      // 被拦截：粉 ✕ 淡痕
+      ctx.save(); ctx.globalAlpha=clamp(0.8-age/ripLife,0,1); ctx.strokeStyle=C.pink; ctx.lineWidth=1.6;
+      ctx.beginPath(); ctx.moveTo(x-4,y-4); ctx.lineTo(x+4,y+4); ctx.moveTo(x+4,y-4); ctx.lineTo(x-4,y+4); ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // 末端呼吸光标
+  const cx=X(idx), cy=Y(DATA.price[idx], r);
+  const t=Date.now()/600; const pr=4+Math.sin(t)*1.6;
+  ctx.save(); ctx.fillStyle=C.cyan; ctx.shadowColor=C.cyan; ctx.shadowBlur=14;
+  ctx.beginPath(); ctx.arc(cx,cy,pr,0,7); ctx.fill(); ctx.restore();
+
+  // 状态栏
+  const datePill=document.getElementById("datePill");
+  const gatePill=document.getElementById("gatePill");
+  const posPill=document.getElementById("posPill");
+  const bubble=document.getElementById("bubble");
+  datePill.textContent = DATA.dates[idx];
+
+  const ready = MAF[idx]!=null && MAS[idx]!=null;
+  const useF = document.getElementById("useFilt").checked;
+  if(!ready){
+    datePill.className="pill idle"; gatePill.className="pill idle"; gatePill.textContent="安检门：预热中";
+    posPill.className="pill idle"; posPill.textContent="持仓：—";
+    bubble.textContent="均线预热中…（前段自动空仓，与回测口径一致）";
+  } else {
+    const above = !useF || (MAFILT[idx]!=null && DATA.price[idx]>MAFILT[idx]);
+    if(useF){
+      if(above){ gatePill.className="pill open"; gatePill.textContent="安检门：开放✓"; }
+      else { gatePill.className="pill block"; gatePill.textContent="安检门：拦截✕"; }
+    } else { gatePill.className="pill idle"; gatePill.textContent="安检门：关闭"; }
+    if(HOLD[idx]){ posPill.className="pill open"; posPill.textContent="持仓：持有中"; }
+    else { posPill.className="pill idle"; posPill.textContent="持仓：空仓"; }
+
+    // 最近信号解释
+    let near=null, nd=999;
+    for(const s of SIGNALS){ const d=idx-s.i; if(d>=0 && d<nd){nd=d; near=s;} }
+    if(near && nd<=3){
+      if(near.type==="death"){ bubble.textContent="死叉 → 清仓（出场规则不受安检门影响）"; }
+      else if(near.passed){ bubble.textContent="金叉 · 趋势向上 → 安检通过，买入"; }
+      else { bubble.textContent="金叉 · 趋势向下 → 安检门拦截，不开仓"; }
+    } else if(HOLD[idx]){ bubble.textContent="持仓中（等待死叉清仓）"; }
+    else if(above && useF){ bubble.textContent="长期趋势向上，金叉一旦出现即可买入"; }
+    else if(!above && useF){ bubble.textContent="长期趋势向下，金叉将被拦截"; }
+    else { bubble.textContent="空仓观望"; }
+  }
+  drawTimeline();
+}
+
+// ---------- 播放循环 ----------
+function tick(now){
+  if(!playing){ return; }
+  if(!lastT) lastT=now;
+  const dt=(now-lastT)/1000; lastT=now;
+  const dur = clamp(N/45, 14, 36);          // 自适应总时长
+  const pps = N/dur;                          // 点/秒
+  progress += dt*pps;
+  if(progress>=N){ progress=N; playing=false;
+    document.getElementById("bubble").textContent="播放完成。可切换代码/参数后点「重播」，或关闭安检门对比。";
+    draw(); return; }
+  draw();
+  rafId=requestAnimationFrame(tick);
+}
+
+function startPlay(){
+  if(!DATA) return;
+  scan();
+  progress=0; lastT=0; playing=true;
+  cancelAnimationFrame(rafId);
+  rafId=requestAnimationFrame(tick);
+}
+
+// ---------- 尺寸适配（含高清屏 & 手机）----------
+function resize(){
+  dpr = window.devicePixelRatio||1;
+  const cssW = cv.clientWidth || cv.parentElement.clientWidth || 900;
+  W = Math.round(cssW);
+  H = Math.round(clamp(cssW*0.52, 280, 520));
+  cv.width = W*dpr; cv.height = H*dpr;
+  cv.style.height = H+"px";
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  const tw=tl.clientWidth; tl.width=tw*dpr; tl.height=tl.clientHeight*dpr; tlc.setTransform(dpr,0,0,dpr,0,0);
+  draw();
+}
+window.addEventListener("resize", resize);
+
+// ---------- 加载数据 ----------
+async function load(){
+  const code=document.getElementById("code").value.trim();
+  const start=document.getElementById("start").value.trim();
+  const end=document.getElementById("end").value.trim();
+  const btn=document.getElementById("loadBtn");
+  btn.disabled=true; btn.textContent="拉取中…";
+  document.getElementById("bubble").textContent="正在现场拉取 "+code+" 的真实行情…";
+  try{
+    const resp = await fetch(`/api/quote?code=${encodeURIComponent(code)}&start=${encodeURIComponent(start)}&end=${encodeURIComponent(end)}&adjust=qfq&source=auto`);
+    const j = await resp.json();
+    if(!j.ok){ throw new Error(j.msg||"未知错误"); }
+    DATA = { dates:j.dates, price:j.price, name:j.name };
+    N = DATA.price.length;
+    document.getElementById("bubble").textContent=`已加载 ${j.name||code}（${j.start} ~ ${j.end}，共 ${N} 个交易日）`;
+    resize();
+    startPlay();
+  }catch(e){
+    document.getElementById("bubble").innerHTML = `<span class="err">加载失败：${e.message}</span>`;
+  }finally{
+    btn.disabled=false; btn.textContent="加载并播放";
+  }
+}
+
+document.getElementById("loadBtn").addEventListener("click", load);
+document.getElementById("replayBtn").addEventListener("click", ()=>{ if(DATA) startPlay(); });
+// 调均线/安检门参数后自动重播（不重新拉数据）
+["fast","slow","filt","useFilt"].forEach(id=>
+  document.getElementById(id).addEventListener("change", ()=>{ if(DATA) startPlay(); }));
+
+// 初始：用默认 600519 自动加载
+resize();
+load();
+</script>
+</body>
+</html>
