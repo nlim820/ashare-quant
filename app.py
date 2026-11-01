@@ -52,10 +52,11 @@ def load_data(symbol, start, end, adjust="qfq", source="auto"):
 
 
 @st.cache_data(show_spinner="回测中...")
-def run_backtest(symbol, start, end, fast, slow, adjust="qfq", source="auto"):
-    """缓存回测结果，避免侧栏微调导致的重复计算。"""
+def run_backtest(symbol, start, end, fast, slow, adjust="qfq", source="auto",
+                filter_ma=None):
+    """缓存回测结果，避免侧栏微调导致的重复计算。filter_ma 透传趋势过滤。"""
     return backtest_run(symbol, start, end, fast, slow, verbose=False,
-                        adjust=adjust, source=source)
+                        adjust=adjust, source=source, filter_ma=filter_ma)
 
 
 def main():
@@ -84,7 +85,25 @@ def main():
         source_label = st.selectbox("数据源", list(SOURCE_LABELS.keys()), index=0)
         source = SOURCE_LABELS[source_label]
 
+        # 趋势过滤（门控式，可选）：给入场加一道"安检"
+        st.divider()
+        st.subheader("趋势过滤（门控式 · 可选）")
+        use_filter = st.checkbox(
+            "启用长期趋势过滤", value=False,
+            help="给入场加一道安检：仅当收盘价高于长期均线时才允许金叉买入；死叉清仓不变。")
+        filter_ma = None
+        if use_filter:
+            filter_ma = st.number_input(
+                "过滤线周期（日均线）", min_value=30, max_value=500,
+                value=240, step=5,
+                help="需大于慢线周期才能覆盖它。默认 240（长期趋势线）。")
+            if filter_ma <= slow:
+                st.warning("过滤线周期需大于慢线周期，否则覆盖不住慢线。")
+
     if fast >= slow:
+        st.stop()
+    if use_filter and filter_ma is not None and filter_ma <= slow:
+        st.warning("过滤线周期需大于慢线周期，请调整后重试。")
         st.stop()
 
     # —— 1) 拉数据 + K线 ——
@@ -97,17 +116,19 @@ def main():
     raw = raw.copy()
     raw["日期"] = pd.to_datetime(raw["日期"])
     raw = raw.sort_values("日期").set_index("日期")
-    raw = add_ma(raw, windows=(fast, slow)).dropna(subset=[f"MA{fast}", f"MA{slow}"])
+    ma_windows = (fast, slow) + ((filter_ma,) if filter_ma else ())
+    raw = add_ma(raw, windows=ma_windows).dropna(subset=[f"MA{fast}", f"MA{slow}"])
 
     asset_kind = "ETF基金" if is_fund(symbol) else "A股个股"
-    st.caption(f"当前标的：{symbol}（{asset_kind}）｜ 数据源：{source_label}｜ 复权：{adjust}")
+    flt_txt = f"｜ 趋势过滤：MA{filter_ma}" if filter_ma else "｜ 趋势过滤：关"
+    st.caption(f"当前标的：{symbol}（{asset_kind}）｜ 数据源：{source_label}｜ 复权：{adjust}{flt_txt}")
     st.subheader(f"📊 K线 + 均线（MA{fast}/MA{slow}）")
-    fig = kline_figure(raw.reset_index(), symbol, fast, slow)
+    fig = kline_figure(raw.reset_index(), symbol, fast, slow, filter_ma=filter_ma)
     st.plotly_chart(fig, use_container_width=True)
 
     # —— 2) 回测绩效 ——
     st.subheader("🧪 双均线策略回测（对比买入持有）")
-    res = run_backtest(symbol, start, end, fast, slow, adjust, source)
+    res = run_backtest(symbol, start, end, fast, slow, adjust, source, filter_ma)
     if res is None:
         st.error("回测失败，请检查参数或稍后重试（可能触发行情限流）。")
         st.stop()
@@ -134,6 +155,16 @@ def main():
 
     verdict = "✅ 策略跑赢买入持有（年化）" if res["beat"] else "⚠️ 策略未跑赢买入持有（年化）"
     st.info(verdict + "　注：单标的单周期结果，不构成投资建议。")
+
+    # 趋势过滤开启时，额外展示"持仓占比/入场次数"并给出诚实解读
+    if res.get("filter_ma"):
+        hc1, hc2 = st.columns(2)
+        hc1.metric("持仓占比", f"{res['hold_ratio']*100:.1f}%")
+        hc2.metric("入场次数", f"{res['n_trades']}")
+        st.caption(
+            f"🔍 已启用 MA{res['filter_ma']} 趋势过滤（门控式）：仅当收盘价高于该长期均线时才允许金叉买入。"
+            "回撤下降可能部分来自「在场时间变短」（持仓占比已给出），夏普未必改善——"
+            "属风控增强而非收益增强，与多标的统计结论一致。")
 
     # —— 2.5) 沪深300 指数基准（判断是否有真正的市场 alpha）——
     if res.get("idx_ann") is not None:

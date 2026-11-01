@@ -22,15 +22,25 @@ from data_utils import get_price, add_ma, get_index
 
 
 class DualMA(bt.Strategy):
-    """双均线交叉策略：金叉买入、死叉清仓。"""
-    params = dict(fast=5, slow=20)
+    """双均线交叉策略：金叉买入、死叉清仓。
+
+    可选趋势过滤（filter_ma）：仅在「收盘价 > 长期均线」时允许金叉买入，
+    相当于给入场加一道"安检"，过滤掉长期下行趋势中的假金叉。
+    死叉清仓规则不变（门控式过滤，只改入场、不改出场）。
+    filter_ma 默认 None = 不启用，行为与旧版完全一致（向后兼容）。
+    """
+    params = dict(fast=5, slow=20, filter_ma=None)
 
     def __init__(self):
         self.ma_fast = bt.ind.SMA(self.data.close, period=self.p.fast)
         self.ma_slow = bt.ind.SMA(self.data.close, period=self.p.slow)
         # CrossOver > 0 表示快线上穿慢线（金叉）；< 0 表示下穿（死叉）
         self.crossover = bt.ind.CrossOver(self.ma_fast, self.ma_slow)
+        # 趋势过滤线：None 表示不启用；否则是一条更慢的长期均线（如 240 日）
+        self.ma_filter = (bt.ind.SMA(self.data.close, period=self.p.filter_ma)
+                          if self.p.filter_ma else None)
         self.order = None
+        self.trade_count = 0   # 统计实际买入（入场）次数
 
     def notify_order(self, order):
         # 订单完成/取消后才允许下一次下单，避免重复发单
@@ -41,11 +51,49 @@ class DualMA(bt.Strategy):
         if self.order:
             return
         if not self.position:
-            if self.crossover > 0:
-                self.order = self.buy()        # 金叉：满仓买入
+            # 入场：金叉 + 趋势过滤（收盘价在长期趋势线上方才视为"可买"）
+            if self.crossover > 0 and self._trend_ok():
+                self.order = self.buy()        # 金叉且趋势向上：满仓买入
+                self.trade_count += 1
         else:
             if self.crossover < 0:
-                self.order = self.close()      # 死叉：清仓
+                self.order = self.close()      # 死叉：清仓（出场规则不变）
+
+    def _trend_ok(self) -> bool:
+        """趋势过滤闸门：未启用过滤时恒真；启用时要求收盘价在长期均线上方。"""
+        if self.ma_filter is None:
+            return True
+        return self.data.close[0] > self.ma_filter[0]
+
+
+class InMarket(bt.Analyzer):
+    """统计「持仓天数占比」：评估窗口内有多少比例的交易日处于持仓状态。
+
+    用途：趋势过滤可能让回撤变小——但这可能是因为"在场时间变短"
+    （少交易、多空仓），而非策略变聪明。必须同时看持仓占比，才能
+    区分"风险真降低"还是"只是少冒了险"。
+    """
+    params = dict(start_bar=0)
+
+    def start(self):
+        self.bar = -1
+        self.in_market = 0
+        self.total = 0
+
+    def next(self):
+        self.bar += 1
+        if self.bar < self.p.start_bar:
+            return
+        self.total += 1
+        if self.strategy.position:
+            self.in_market += 1
+
+    def get_analysis(self):
+        return dict(
+            ratio=self.in_market / self.total if self.total else 0.0,
+            in_market=self.in_market,
+            total=self.total,
+        )
 
 
 def compute_metrics(daily_ret: pd.Series) -> dict:
@@ -62,12 +110,15 @@ def compute_metrics(daily_ret: pd.Series) -> dict:
 
 def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
         verbose: bool = True, warmup: int = None, adjust: str = "qfq",
-        source: str = "auto") -> dict | None:
+        source: str = "auto", filter_ma: int = None) -> dict | None:
     """对单只股票跑回测；verbose=False 时只返回结果字典（供批量调用）。
 
     warmup：对齐参数。传入时，策略日收益与买入持有都截到「第 warmup 个交易
     日」为统一评估起点，使不同参数组在【完全相同】的窗口上比较（否则慢线越
     大、策略可交易起点越后移，买入持有基准口径会漂移，导致跨参数不可比）。
+
+    filter_ma：趋势过滤线周期（如 240）。启用时评估窗口会自动后移到
+    max(warmup, filter_ma)，保证过滤线就绪后才开始比较，否则窗口不一致。
     """
     try:
         raw = get_price(symbol, start, end, adjust, source)
@@ -80,25 +131,33 @@ def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
     raw = raw.sort_values("日期").set_index("日期")
     raw = add_ma(raw, windows=(fast, slow))   # 加均线列（前导为 NaN）
 
+    # 统一评估起点：过滤线周期更长，必须后移到 max(warmup, filter_ma)，
+    # 否则过滤线还没就绪就开始比较，结论会失真。
+    eff_warmup = warmup
+    if filter_ma:
+        eff_warmup = max(eff_warmup if eff_warmup is not None else 0, filter_ma)
+    start_bar = eff_warmup if eff_warmup is not None else 0
+
     # 用完整数据喂回测：策略会等自己的均线就绪后才交易（前段自动空仓）
     data = bt.feeds.PandasData(
         dataname=raw, open="开盘", high="最高", low="最低",
         close="收盘", volume="成交量", openinterest=-1,
     )
     cerebro = bt.Cerebro()
-    cerebro.addstrategy(DualMA, fast=fast, slow=slow)
+    cerebro.addstrategy(DualMA, fast=fast, slow=slow, filter_ma=filter_ma)
     cerebro.adddata(data)
     cerebro.broker.setcash(100000.0)
     cerebro.broker.setcommission(commission=0.0005)   # 单边万 5 手续费
     cerebro.addsizer(bt.sizers.PercentSizer, percents=95)
     cerebro.addanalyzer(bt.analyzers.TimeReturn, _name="tr", timeframe=bt.TimeFrame.Days)
+    cerebro.addanalyzer(InMarket, _name="im", start_bar=start_bar)  # 持仓天数占比
 
     result = cerebro.run()
     tr_full = pd.Series(result[0].analyzers.tr.get_analysis())   # 全周期日收益
 
     # —— 统一评估窗口 ——
-    if warmup is not None:
-        eval_start = raw.index[warmup]
+    if eff_warmup is not None:
+        eval_start = raw.index[eff_warmup]
         tr = tr_full.loc[eval_start:].dropna()
         close_eval = raw["收盘"].loc[eval_start:]
     else:
@@ -112,6 +171,11 @@ def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
     bh_tr = close_eval.pct_change().dropna()
     bh = compute_metrics(bh_tr)
     bh_total = close_eval.iloc[-1] / close_eval.iloc[0] - 1.0
+
+    # 持仓天数占比 + 入场次数（趋势过滤后这两项会变，必须一并看）
+    im = result[0].analyzers.im.get_analysis()
+    hold_ratio = im["ratio"]
+    n_trades = result[0].trade_count
 
     # —— 沪深300 指数基准：判断策略是否真有「市场 alpha」——
     # 仅仅跑赢「同标的买入持有」不够，必须跑赢「市场」才算有 alpha。
@@ -134,8 +198,9 @@ def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
             print(f"   ⚠️ 指数基准获取失败，跳过：{e}")
 
     if verbose:
+        flt = f" + MA{filter_ma} 趋势过滤" if filter_ma else ""
         print("\n" + "=" * 56)
-        print(f"回测标的：{symbol} ｜ 策略：MA{fast}/{slow} 双均线交叉")
+        print(f"回测标的：{symbol} ｜ 策略：MA{fast}/{slow} 双均线交叉{flt}")
         print("=" * 56)
         print(f"{'指标':<10}{'双均线策略':>16}{'买入持有':>16}")
         print("-" * 56)
@@ -143,6 +208,9 @@ def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
         print(f"{'年化收益':<10}{strat['ann']*100:>15.2f}%{bh['ann']*100:>15.2f}%")
         print(f"{'夏普比率':<10}{strat['sharpe']:>16.2f}{bh['sharpe']:>16.2f}")
         print(f"{'最大回撤':<10}{strat['max_dd']*100:>15.2f}%{bh['max_dd']*100:>15.2f}%")
+        print("-" * 56)
+        print(f"{'入场次数':<10}{n_trades:>16}{'':>16}")
+        print(f"{'持仓占比':<10}{hold_ratio*100:>15.1f}%{'':>16}")
         print("-" * 56)
         verdict = "策略跑赢买入持有 ✅" if strat["ann"] > bh["ann"] else "策略未跑赢买入持有 ⚠️"
         print(verdict)
@@ -158,6 +226,7 @@ def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
         bh_total=bh_total, bh_ann=bh["ann"],
         bh_sharpe=bh["sharpe"], bh_maxdd=bh["max_dd"],
         beat=strat["ann"] > bh["ann"],
+        hold_ratio=hold_ratio, n_trades=n_trades, filter_ma=filter_ma,
         strat_tr=tr,            # 策略日收益序列（评估窗口），供资金曲线展示
         bh_tr=bh_tr,             # 买入持有日收益序列
         idx_ann=idx_ann, idx_beta=idx_beta, idx_alpha=idx_alpha,
@@ -173,9 +242,11 @@ def main() -> None:
     p.add_argument("--slow", type=int, default=20)
     p.add_argument("--source", default="auto",
                    choices=["auto", "em", "tx", "sina"], help="数据源：auto/em 东财、tx 腾讯、sina 新浪")
+    p.add_argument("--filter", type=int, default=None,
+                   help="趋势过滤线周期（如 240）。开启后仅在收盘价高于该均线时才允许金叉买入")
     args = p.parse_args()
     run(args.symbol, args.start, args.end, args.fast, args.slow,
-        verbose=True, source=args.source)
+        verbose=True, source=args.source, filter_ma=args.filter)
 
 
 if __name__ == "__main__":
