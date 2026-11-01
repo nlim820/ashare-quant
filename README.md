@@ -1,5 +1,7 @@
 # A股/基金量化分析项目 (A-Share & Fund Quant Project)
 
+> **作者：小陆 ｜ 个人项目（独立完成）**
+
 > 一个面向简历的、可增量推进的金融数据分析与量化回测项目。
 > A resume-oriented, incrementally-built financial data analysis & backtest project.
 
