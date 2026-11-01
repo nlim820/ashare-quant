@@ -96,6 +96,28 @@ class InMarket(bt.Analyzer):
         )
 
 
+class RealisticCommInfo(bt.CommissionInfo):
+    """真实成本模型（可选，仅在 run(cost_model='realistic') 时启用）。
+
+    默认 run(cost_model='simple') 行为【完全不变】（仅单边万5佣金，与旧版一致）。
+    本类把 A 股真实摩擦成本显式计入，用于论文「成本稳健性」检验：
+      - 佣金：双边 万5        (0.0005)
+      - 滑点：双边 0.1%       (0.001)，以「比例交易成本」近似建模（非价格冲击）
+      - 印花税：单边卖出 0.05% (0.0005)
+      - 过户费：双边 约万0.1  (0.00001)，沪市；此处对所有标的近似计入
+    实现要点（踩坑记录，避免后人重蹈）：
+      - backtrader 实际算佣金的方法是 ``_getcommission``（返回【绝对金额】），
+        而非 ``getcommission``；必须覆盖前者，并在内部乘上 abs(size)*price。
+      - 费率直接写死在此方法内（不依赖基类 params 合并，避免被默认 0 覆盖）。
+    """
+    def _getcommission(self, size, price, pseudoexec):
+        # 双边固定摩擦 = 佣金万5 + 滑点0.1% + 过户费万0.1
+        c = 0.0005 + 0.001 + 0.00001
+        if size < 0:          # 印花税 0.05%（仅卖出）
+            c += 0.0005
+        return abs(size) * c * price   # 返回绝对佣金金额
+
+
 def compute_metrics(daily_ret: pd.Series) -> dict:
     """从日收益序列计算年化收益、夏普、最大回撤。"""
     equity = (1.0 + daily_ret).cumprod()          # 资金曲线
@@ -111,7 +133,7 @@ def compute_metrics(daily_ret: pd.Series) -> dict:
 def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
         verbose: bool = True, warmup: int = None, adjust: str = "qfq",
         source: str = "auto", filter_ma: int = None,
-        eval_start: str = None) -> dict | None:
+        eval_start: str = None, cost_model: str = "simple") -> dict | None:
     """对单只股票跑回测；verbose=False 时只返回结果字典（供批量调用）。
 
     warmup：对齐参数。传入时，策略日收益与买入持有都截到「第 warmup 个交易
@@ -166,7 +188,16 @@ def run(symbol: str, start: str, end: str, fast: int = 5, slow: int = 20,
     cerebro.addstrategy(DualMA, fast=fast, slow=slow, filter_ma=filter_ma)
     cerebro.adddata(data)
     cerebro.broker.setcash(100000.0)
-    cerebro.broker.setcommission(commission=0.0005)   # 单边万 5 手续费
+    # 成本模型：默认 'simple' = 仅单边万5佣金（与旧版完全一致，简历数字不受影响）；
+    # 'realistic' = 佣金+滑点+印花税+过户费（论文成本稳健性检验用，需显式指定）。
+    if cost_model == "realistic":
+        # 显式传 commtype=COMM_PERC（按比例计）。CommInfoBase 默认 commtype=None
+        # 时若 margin 为空会按 stocklike 判定，本类 stocklike 默认 False 会落到
+        # COMM_FIXED，把返回的费率误当作「每股固定金额」→ 成本被算成近似 0。
+        cerebro.broker.addcommissioninfo(
+            RealisticCommInfo(commtype=bt.CommInfoBase.COMM_PERC))
+    else:
+        cerebro.broker.setcommission(commission=0.0005)   # 单边万 5 手续费
     cerebro.addsizer(bt.sizers.PercentSizer, percents=95)
     cerebro.addanalyzer(bt.analyzers.TimeReturn, _name="tr", timeframe=bt.TimeFrame.Days)
     cerebro.addanalyzer(InMarket, _name="im", start_bar=start_bar)  # 持仓天数占比
