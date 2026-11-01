@@ -21,14 +21,25 @@
 
 需要：Python 3.9+，且已安装 `akshare`、`pandas`（即主项目环境，无需额外安装 Flask 等）。
 
+### 方式一：一键启动（推荐，Windows 双击）
+
+直接**双击 `anim/run.bat`** —— 它会自动启动后端，并在 1 秒后**自动弹出浏览器**打开演示页。
+全程无需手动开终端、也无需手动开浏览器。要停止时，关掉弹出的黑色后端窗口即可。
+
+> 若浏览器没有自动弹出，手动访问 **http://localhost:8765** 即可。
+
+### 方式二：命令行启动
+
 ```bash
 cd ashare_quant/anim
-python server.py            # 默认 http://localhost:8765
-# 或自定义端口：
+python server.py            # 默认 http://localhost:8765，并自动打开浏览器
+# 不想自动开浏览器时：
+python server.py --no-browser
+# 自定义端口：
 python server.py --port 9000
 ```
 
-然后在浏览器打开 **http://localhost:8765** ，输入代码点击「加载并播放」。
+浏览器打开 **http://localhost:8765** ，输入代码点击「加载并播放」。
 
 > 首次对某标的拉取会走 akshare 实时接口并写入 `../data/raw/*.csv` 缓存；之后离线也能秒开。
 > 若东财被限流，后端自动回退新浪/腾讯；股票名称可能临时回退为代码（限流恢复后正常）。

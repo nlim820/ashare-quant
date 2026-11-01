@@ -24,6 +24,8 @@ import os
 import sys
 import json
 import argparse
+import threading
+import webbrowser
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -134,13 +136,37 @@ def main():
     ap = argparse.ArgumentParser(description="双均线趋势过滤动画后端")
     ap.add_argument("--port", type=int, default=PORT, help="监听端口")
     ap.add_argument("--host", default="0.0.0.0", help="监听地址")
+    ap.add_argument("--no-browser", action="store_true",
+                    help="不自动打开浏览器（需手动访问 http://localhost:端口）")
     args = ap.parse_args()
-    srv = HTTPServer((args.host, args.port), Handler)
+
+    try:
+        srv = HTTPServer((args.host, args.port), Handler)
+    except OSError as e:
+        port = args.port
+        print("✗ 启动失败：端口 %d 被占用或服务已运行。" % port)
+        print("  解决：换一个端口，例如  python server.py --port 9000")
+        print("  或关掉已经运行的同名窗口后重试。")
+        print("  错误详情：%s" % e)
+        sys.exit(1)
+
+    url = "http://localhost:%d" % args.port
     print("=" * 56)
     print(" 双均线 + 240 趋势过滤「安检门」动画已启动")
-    print(f" 在浏览器打开：  http://localhost:{args.port}")
+    print(f" 演示地址：  {url}")
     print(" 数据来源：父项目 ashare_quant/src/data_utils（多源回退 + 本地缓存）")
     print("=" * 56)
+
+    # 启动后自动用默认浏览器打开演示页（除非显式 --no-browser）
+    if not args.no_browser:
+        def _open_browser():
+            try:
+                webbrowser.open(url)
+            except Exception:
+                pass
+        threading.Timer(1.0, _open_browser).start()
+        print(" 正在自动打开浏览器…（若未弹出，请手动访问上方地址）")
+
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
