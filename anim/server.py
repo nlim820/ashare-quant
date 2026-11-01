@@ -36,7 +36,8 @@ if PARENT_SRC not in sys.path:
     sys.path.insert(0, PARENT_SRC)
 import data_utils  # noqa: E402
 
-PORT = 8765
+# 云端部署平台会注入 PORT 环境变量；本地无则默认 8765
+PORT = int(os.environ.get("PORT", 8765))
 _NAME_CACHE = {}  # code -> 名称（进程内缓存，避免重复查询/限流）
 
 
