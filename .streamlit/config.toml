@@ -1,6 +1,8 @@
 [server]
 headless = true
-enableCORS = false
+# 注意：不要设置 enableCORS = false。
+# 该选项会关闭跨源校验，使任意站点都能与本应用的 WebSocket 建立连接，
+# Streamlit 启动时会为此刷警告。保持默认（开启）即可，公网部署必须开启。
 
 [theme]
 base = "light"

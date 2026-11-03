@@ -25,6 +25,7 @@
 """
 import math
 from phase2_backtest import run
+from robust_stats import paired_t
 
 SYMBOLS = [  # 与 phase2_deepen / phase3_improve 同批 20 只跨行业大盘股
     "600519", "000001", "600036", "000651", "000333", "600276", "601318", "600900",
@@ -43,17 +44,8 @@ IS_WARMUP = None
 
 
 def _paired_t(diff):
-    xs = [v for v in diff if v == v]
-    n = len(xs)
-    if n < 3:
-        return 0.0, 0.0, 1.0
-    mean = sum(xs) / n
-    var = sum((v - mean) ** 2 for v in xs) / (n - 1)
-    if var <= 0:
-        return mean, 0.0, 1.0
-    t = mean / math.sqrt(var / n)
-    p = 2.0 * (1.0 - 0.5 * (1.0 + math.erf(abs(t) / math.sqrt(2.0))))
-    return mean, t, p
+    """兼容旧名字：转发到 robust_stats.paired_t（全项目唯一实现）。"""
+    return paired_t(diff)
 
 
 def _run_is(s, flt):

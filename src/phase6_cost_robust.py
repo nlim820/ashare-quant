@@ -38,7 +38,8 @@ def main() -> None:
     print("=" * 72)
     print("Phase 6｜交易成本稳健性检验")
     print(f"样本：{len(SYMBOLS)} 只大盘股 ｜ 窗口 {START}–{END} ｜ 预热 {WARMUP} 天")
-    print("策略：MA{FAST}/{SLOW} 双均线（原版，无趋势过滤）")
+    print(f"策略：MA{FAST}/{SLOW} 双均线（原版，无趋势过滤）")
+    print("成本：simple=单边万5佣金 ｜ realistic=佣金+滑点0.1%+印花税(2023-08-28前0.1%/后0.05%)+过户费")
     print("=" * 72)
     print(f"{'标的':<8}{'年化(simple)':>14}{'年化(real)':>14}{'回撤(simple)':>14}{'回撤(real)':>14}")
 
@@ -56,8 +57,11 @@ def main() -> None:
         s_dd.append(si["strat_maxdd"]); r_dd.append(ri["strat_maxdd"])
         s_sh.append(si["strat_sharpe"]); r_sh.append(ri["strat_sharpe"])
         s_beat += int(si["beat"]); r_beat += int(ri["beat"])
-        if si["idx_alpha"] is not None:
-            s_alpha.append(si["idx_alpha"]); r_alpha.append(ri["idx_alpha"])
+        # α 优先用回归截距（NW 稳健）口径；拿不到时才退回年化相减的近似值
+        a_s = si.get("idx_alpha_ols") if si.get("idx_alpha_ols") is not None else si.get("idx_alpha")
+        a_r = ri.get("idx_alpha_ols") if ri.get("idx_alpha_ols") is not None else ri.get("idx_alpha")
+        if a_s is not None:
+            s_alpha.append(a_s); r_alpha.append(a_r)
         print(f"{s:<8}{si['strat_ann']*100:>13.2f}%{ri['strat_ann']*100:>13.2f}%"
               f"{si['strat_maxdd']*100:>13.2f}%{ri['strat_maxdd']*100:>13.2f}%")
 
@@ -77,7 +81,7 @@ def main() -> None:
     print(f"个股夏普均值：simple {np.mean(s_sh):6.2f} → real {np.mean(r_sh):6.2f}")
     print(f"跑赢买入持有：simple {s_beat}/{n} ｜ real {r_beat}/{n}")
     if s_alpha:
-        print(f"CAPM approx α 均值：simple {np.mean(s_alpha)*100:6.2f}% → real {np.mean(r_alpha)*100:6.2f}%")
+        print(f"年化Alpha（CAPM回归截距, NW稳健）均值：simple {np.mean(s_alpha)*100:6.2f}% → real {np.mean(r_alpha)*100:6.2f}%")
         neg_s = sum(1 for a in s_alpha if a < 0); neg_r = sum(1 for a in r_alpha if a < 0)
         print(f"α<0（无正 alpha）占比：simple {neg_s}/{len(s_alpha)} ｜ real {neg_r}/{len(r_alpha)}")
     print("=" * 72)

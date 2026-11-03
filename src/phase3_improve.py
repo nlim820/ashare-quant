@@ -12,12 +12,20 @@
    过滤线还没就绪就开始比，结论失真。
 2. 必须同时看「持仓天数占比」：回撤变小可能是因为"在场时间变短"（少冒
    险），而非策略变聪明。若持仓占比大幅下降，要结合风险收益比重新判断。
+3. **横截面相关性**：20 只大盘股同涨同跌，配对 t 的独立性假设并不成立。
+   因此本脚本除了朴素 p 值，还会给出「按有效样本量折算后」的 p，
+   并明确提示不要只引用朴素 p。深入分析见 phase7_robust_se.py。
 
 用法：
     python src/phase3_improve.py
 """
 import math
+
+import numpy as np
+import pandas as pd
+
 from phase2_backtest import run
+from robust_stats import paired_t, effective_sample_size
 
 # 与 phase2_deepen 同一批 20 只跨行业大盘股，保证可比
 SYMBOLS = [
@@ -32,18 +40,8 @@ START, END = "20200101", "20231231"
 
 
 def _paired_t(diff):
-    """对配对差值做单样本 t 检验（差值 vs 0），返回 (均值, t, 双尾 p)。"""
-    xs = [v for v in diff if v == v]
-    n = len(xs)
-    if n < 3:
-        return 0.0, 0.0, 1.0
-    mean = sum(xs) / n
-    var = sum((v - mean) ** 2 for v in xs) / (n - 1)
-    if var <= 0:
-        return mean, 0.0, 1.0
-    t = mean / math.sqrt(var / n)
-    p = 2.0 * (1.0 - 0.5 * (1.0 + math.erf(abs(t) / math.sqrt(2.0))))
-    return mean, t, p
+    """兼容旧名字：转发到 robust_stats.paired_t（唯一实现，避免两份漂移）。"""
+    return paired_t(diff)
 
 
 def main() -> None:
@@ -95,6 +93,16 @@ def main() -> None:
     md_ann, t_ann, p_ann = _paired_t(d_ann)
     md_dd, t_dd, p_dd = _paired_t(d_dd)   # >0 表示回撤变浅（改善）
 
+    # —— 横截面相关性修正（关键）——
+    # 20 只股票的策略日收益高度相关，配对 t 的标准误被低估，
+    # 朴素 p 值会"过于好看"。这里按有效样本量折算给出保守 p。
+    # 注意用【策略】日收益算相关（配对检验比的是策略指标），不是买入持有收益。
+    rets = pd.DataFrame({s: b["strat_tr"] for s, b, f in rows}).dropna()
+    rho, n_eff, n_sym = effective_sample_size(rets)
+    inflate = math.sqrt(n_sym / n_eff) if n_eff > 0 else 1.0
+    p_dd_adj = math.erfc(abs(t_dd / inflate) / math.sqrt(2.0))
+    p_ann_adj = math.erfc(abs(t_ann / inflate) / math.sqrt(2.0))
+
     print("\n" + "=" * 78)
     print("均值对比（原版 → 过滤版）：")
     print(f"  年化收益   {m_ann_b*100:>7.2f}%  →  {m_ann_f*100:>6.2f}%   "
@@ -104,6 +112,11 @@ def main() -> None:
     print(f"  夏普比率   {m_sharpe_b:>7.2f}  →  {m_sharpe_f:>6.2f}")
     print(f"  持仓占比   {m_hold_b*100:>7.1f}%  →  {m_hold_f*100:>6.1f}%")
     print(f"  入场次数   {m_tr_b:>7.1f}  →  {m_tr_f:>6.1f}")
+    print("-" * 78)
+    print(f"  横截面相关性修正：ρ̄={rho:.3f} ｜ 有效独立样本 n_eff≈{n_eff:.1f}/{n_sym} 只"
+          f" ｜ 标准误需放大 {inflate:.2f} 倍")
+    print(f"  → 修正后 p：Δ回撤 {p_dd_adj:.3f}（朴素 {p_dd:.3f}）｜ "
+          f"Δ年化 {p_ann_adj:.3f}（朴素 {p_ann:.3f}）")
     print("=" * 78)
 
     # —— 诚实解读 ——
@@ -113,20 +126,28 @@ def main() -> None:
     print(f"  2) 持仓占比从 {m_hold_b*100:.1f}% 骤降到 {m_hold_f*100:.1f}%"
           f"——约 {m_hold_b*100 - m_hold_f*100:.0f} 个百分点时间处于空仓；")
     print("     所以『最大回撤变小』很大程度是『在场时间变短』造成的，而非信号更聪明。")
-    if md_dd > 0 and p_dd < 0.05:
-        print(f"  3) 最大回撤平均从 {m_dd_b*100:.2f}% 改善到 {m_dd_f*100:.2f}%"
-              f"（配对 t 检验 p={p_dd:.3f}，统计显著）——风控目标达成。")
+    if md_dd > 0 and p_dd_adj < 0.05:
+        print(f"  3) 最大回撤平均从 {m_dd_b*100:.2f}% 改善到 {m_dd_f*100:.2f}%，"
+              f"且通过相关性修正（p={p_dd_adj:.3f}）——风控目标达成。")
+    elif md_dd > 0 and p_dd < 0.05:
+        print(f"  3) 最大回撤平均从 {m_dd_b*100:.2f}% 改善到 {m_dd_f*100:.2f}%，"
+              f"但**仅朴素检验显著**（p={p_dd:.3f}）。")
+        print(f"     按 ρ̄={rho:.2f}、n_eff≈{n_eff:.1f} 只折算后 p={p_dd_adj:.3f}，不再显著。")
+        print("     因此只能表述为『方向性改善』，不可写『统计显著』。")
+        print("     深入检验（组合层面 block bootstrap）见 phase7_robust_se.py。")
     elif md_dd > 0:
         print(f"  3) 最大回撤平均改善（{m_dd_b*100:.2f}%→{m_dd_f*100:.2f}%），"
               f"但 p={p_dd:.3f} 未达 0.05 显著。")
     else:
         print(f"  3) 最大回撤平均未改善（p={p_dd:.3f}）。")
-    print(f"  4) 但夏普比率从 {m_sharpe_b:.2f} 降到 {m_sharpe_f:.2f}、年化收益 p={p_ann:.3f} 无改善：")
+    print(f"  4) 但夏普比率从 {m_sharpe_b:.2f} 降到 {m_sharpe_f:.2f}、"
+          f"年化收益 p={p_ann:.3f} 无改善：")
     print("     趋势过滤是『钝器』——既砍掉下跌途中的假金叉，也错失上行金叉；")
     print("     『少冒险』≠『更会冒险』，风险收益比（Sharpe）反而变差。")
     print("  5) 与 Phase 2 结论自洽：双均线价值在控回撤、不在增厚 alpha；")
     print("     趋势过滤把这一点推到极致——但它用『长期空仓』换来的，并非免费午餐。")
     print("=" * 78)
+
 
 
 if __name__ == "__main__":

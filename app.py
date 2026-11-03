@@ -11,7 +11,9 @@
 
 说明：本项目仅为学习/简历演示，所有回测均为历史模拟，不构成投资建议。
 """
+import re
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # 让仓库根目录的 app.py 能 import src/ 下的模块
@@ -21,7 +23,7 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-from data_utils import get_price, add_ma, is_fund
+from data_utils import get_price, add_ma, is_fund, get_meta
 from viz import kline_figure
 from phase2_backtest import run as backtest_run
 
@@ -44,19 +46,35 @@ SOURCE_LABELS = {
     "新浪财经": "sina",
 }
 
+DATE_FMT = "%Y%m%d"
 
-@st.cache_data(show_spinner="正在拉取行情（首次会联网）...")
+
+def _parse_date(s: str):
+    """严格解析 YYYYMMDD；非法返回 None（不抛异常，交给调用方提示）。"""
+    try:
+        return datetime.strptime(s.strip(), DATE_FMT)
+    except Exception:
+        return None
+
+
+@st.cache_data(ttl=3600, show_spinner="正在拉取行情（首次会联网）...")
 def load_data(symbol, start, end, adjust="qfq", source="auto"):
-    """带缓存的行情获取（与回测共用本地缓存文件，不会重复联网）。"""
+    """带缓存的行情获取（与回测共用本地缓存文件，不会重复联网）。
+
+    ttl=3600：网页缓存 1 小时后自动失效，配合 data_utils 的 30 天磁盘 TTL，
+    避免"永久缓存导致数据看起来永不更新"。返回的 DataFrame 带 attrs
+    （fetched_at / adjust_note），用于在页面上标注数据快照日。
+    """
     return get_price(symbol, start, end, adjust, source)
 
 
-@st.cache_data(show_spinner="回测中...")
+@st.cache_data(ttl=3600, show_spinner="回测中...")
 def run_backtest(symbol, start, end, fast, slow, adjust="qfq", source="auto",
-                filter_ma=None):
-    """缓存回测结果，避免侧栏微调导致的重复计算。filter_ma 透传趋势过滤。"""
+                 filter_ma=None, lot_size=None, cash=100000.0, cost_model="simple"):
+    """缓存回测结果，避免侧栏微调导致的重复计算。"""
     return backtest_run(symbol, start, end, fast, slow, verbose=False,
-                        adjust=adjust, source=source, filter_ma=filter_ma)
+                        adjust=adjust, source=source, filter_ma=filter_ma,
+                        lot_size=lot_size, cash=cash, cost_model=cost_model)
 
 
 def main():
@@ -100,6 +118,32 @@ def main():
             if filter_ma <= slow:
                 st.warning("过滤线周期需大于慢线周期，否则覆盖不住慢线。")
 
+        # 可执行性（默认关闭 = 与论文/简历口径一致）
+        st.divider()
+        with st.expander("可执行性设置（默认关闭）"):
+            st.caption("默认允许小数股、初始资金 10 万，与论文口径一致。"
+                       "开启整手约束可看真实可执行性——高价股（如茅台）"
+                       "在小资金下可能一手都买不起。")
+            use_lot = st.checkbox("按 A 股整手（100 股）约束", value=False)
+            cash = st.number_input("初始资金（元）", min_value=10000, max_value=100000000,
+                                   value=100000, step=10000)
+            use_real_cost = st.checkbox("计入真实成本（滑点+印花税+过户费）", value=False)
+        lot_size = 100 if use_lot else None
+        cost_model = "realistic" if use_real_cost else "simple"
+
+    # —— 输入校验（早失败、给明确提示，而不是抛未捕获异常）——
+    if not re.fullmatch(r"\d{6}", symbol):
+        st.error(f"代码格式不正确：`{symbol}`。请输入 6 位数字（A股如 600519，ETF 如 510300）。")
+        st.stop()
+    d0, d1 = _parse_date(start), _parse_date(end)
+    if d0 is None or d1 is None:
+        st.error("日期格式不正确，请使用 YYYYMMDD（例如 20200101）。")
+        st.stop()
+    if d0 >= d1:
+        st.error("开始日期必须早于结束日期。")
+        st.stop()
+    if (d1 - d0).days < 60:
+        st.warning("区间不足 60 天，均线与回测结果可能不具参考性。")
     if fast >= slow:
         st.stop()
     if use_filter and filter_ma is not None and filter_ma <= slow:
@@ -113,22 +157,46 @@ def main():
         st.error(f"行情获取失败：{e}（可能触发行情接口限流，请稍后重试）")
         st.stop()
 
+    if raw is None or len(raw) == 0:
+        st.error("未取到任何行情数据，请检查代码或日期区间。")
+        st.stop()
+    if len(raw) < 30:
+        st.warning(f"仅取到 {len(raw)} 行数据，样本过少，回测结果不可靠。")
+
     raw = raw.copy()
     raw["日期"] = pd.to_datetime(raw["日期"])
     raw = raw.sort_values("日期").set_index("日期")
     ma_windows = (fast, slow) + ((filter_ma,) if filter_ma else ())
     raw = add_ma(raw, windows=ma_windows).dropna(subset=[f"MA{fast}", f"MA{slow}"])
+    if len(raw) < 30:
+        st.error("扣除均线预热后数据不足 30 个交易日，请把区间拉长。")
+        st.stop()
 
     asset_kind = "ETF基金" if is_fund(symbol) else "A股个股"
     flt_txt = f"｜ 趋势过滤：MA{filter_ma}" if filter_ma else "｜ 趋势过滤：关"
     st.caption(f"当前标的：{symbol}（{asset_kind}）｜ 数据源：{source_label}｜ 复权：{adjust}{flt_txt}")
+
+    # 数据快照日 + 复权口径提示（前复权会随最新价漂移，必须标出来）
+    meta = get_meta(symbol, start, end, adjust, source)
+    snap = meta.get("fetched_at") or raw.attrs.get("fetched_at") or "仓库内种子快照（无拉取时间）"
+    st.caption(f"🗓️ 数据快照：{snap}　｜　区间 {raw.index[0].date()} ~ {raw.index[-1].date()}"
+               f"（{len(raw)} 个交易日）")
+    if meta.get("adjust_note") == "sina_noadj" or raw.attrs.get("adjust_note") == "sina_noadj":
+        st.warning("⚠️ 本次数据来自新浪备用源，该源**不复权**：历史价格未做过除权调整，"
+                   "收益与回撤会与复权口径存在偏差。")
+    elif raw.attrs.get("adjust_note") == "stale_cache":
+        st.info("ℹ️ 本次使用本地旧缓存（刷新失败），数据可能不是最新。")
+
     st.subheader(f"📊 K线 + 均线（MA{fast}/MA{slow}）")
     fig = kline_figure(raw.reset_index(), symbol, fast, slow, filter_ma=filter_ma)
-    st.plotly_chart(fig, use_container_width=True)
+    # 用 width="stretch" 而不是 use_container_width=True：
+    # 后者已被 Streamlit 标记为 2025-12-31 后移除，长期部署会突然失效。
+    st.plotly_chart(fig, width="stretch")
 
     # —— 2) 回测绩效 ——
     st.subheader("🧪 双均线策略回测（对比买入持有）")
-    res = run_backtest(symbol, start, end, fast, slow, adjust, source, filter_ma)
+    res = run_backtest(symbol, start, end, fast, slow, adjust, source, filter_ma,
+                       lot_size, cash, cost_model)
     if res is None:
         st.error("回测失败，请检查参数或稍后重试（可能触发行情限流）。")
         st.stop()
@@ -140,6 +208,20 @@ def main():
               f"{res['strat_sharpe']-res['bh_sharpe']:+.2f} vs 持有")
     c3.metric("策略最大回撤", f"{res['strat_maxdd']*100:.2f}%",
               f"{(res['strat_maxdd']-res['bh_maxdd'])*100:+.2f}% vs 持有")
+
+    # 可执行性/成本口径提示：让"这组数字是在什么假设下算的"永远可见
+    if lot_size or cost_model == "realistic":
+        bits = []
+        if lot_size:
+            bits.append(f"整手约束 {lot_size} 股、初始资金 {cash:,.0f} 元")
+        if cost_model == "realistic":
+            bits.append("含滑点0.1%+印花税0.1%/0.05%+过户费")
+        st.info("本结果口径：" + "；".join(bits)
+                + (f"　｜　实际入场 {res['n_trades']} 次，持仓占比 {res['hold_ratio']*100:.1f}%"
+                   if lot_size else ""))
+        if lot_size and res["n_trades"] == 0:
+            st.warning("整手约束下**一次都没买进**：该标的一手价格已超过账户可用资金。"
+                       "这正是高价股在小资金下的真实约束。")
 
     cmp = pd.DataFrame({
         "指标": ["总收益", "年化收益", "夏普比率", "最大回撤"],
@@ -164,7 +246,7 @@ def main():
         st.caption(
             f"🔍 已启用 MA{res['filter_ma']} 趋势过滤（门控式）：仅当收盘价高于该长期均线时才允许金叉买入。"
             "回撤下降可能部分来自「在场时间变短」（持仓占比已给出），夏普未必改善——"
-            "属风控增强而非收益增强，与多标的统计结论一致。")
+            "属风控增强而非收益增强。")
 
     # —— 2.5) 沪深300 指数基准（判断是否有真正的市场 alpha）——
     if res.get("idx_ann") is not None:
@@ -172,9 +254,20 @@ def main():
         ic1, ic2, ic3 = st.columns(3)
         ic1.metric("沪深300 年化", f"{res['idx_ann']*100:.2f}%")
         ic2.metric("Beta（对沪深300）", f"{res['idx_beta']:.2f}")
-        ic3.metric("年化 Alpha（约）", f"{res['idx_alpha']*100:.2f}%")
-        st.caption("Alpha ≈ 策略年化 − Beta×指数年化（无风险利率取 0）。"
-                   "仅跑赢「同标的买入持有」不够，Alpha>0 才说明真正跑赢市场、而非靠 Beta 暴露。")
+        if res.get("idx_alpha_ols") is not None:
+            ic3.metric("年化 Alpha（回归截距）", f"{res['idx_alpha_ols']*100:.2f}%",
+                       f"t={res['idx_alpha_t']:.2f}")
+        else:
+            ic3.metric("年化 Alpha（近似）", f"{res['idx_alpha']*100:.2f}%")
+        if res.get("idx_alpha_p") is not None:
+            sig = "显著" if res["idx_alpha_p"] < 0.05 else "不显著"
+            st.caption(
+                f"Alpha 为 CAPM 回归截距（Newey-West 稳健标准误，p={res['idx_alpha_p']:.3f}，{sig}）。"
+                f"近似口径（年化相减）为 {res['idx_alpha']*100:.2f}%，仅作对照、不宜单独引用。"
+                "仅跑赢「同标的买入持有」不够，Alpha>0 且显著才说明真正跑赢市场。")
+        else:
+            st.caption("Alpha ≈ 策略年化 − Beta×指数年化（无风险利率取 0）。"
+                       "仅跑赢「同标的买入持有」不够，Alpha>0 才说明真正跑赢市场。")
 
     # —— 3) 资金曲线 ——
     if "strat_tr" in res and "bh_tr" in res and len(res["strat_tr"]) > 1:
@@ -189,10 +282,10 @@ def main():
         eq_fig.update_layout(height=400, yaxis_title="净值（初始=1）",
                             legend=dict(orientation="h", y=1.02, x=0),
                             margin=dict(l=40, r=20, t=30, b=40))
-        st.plotly_chart(eq_fig, use_container_width=True)
+        st.plotly_chart(eq_fig, width="stretch")
 
     st.divider()
-    st.caption("数据来源：akshare（东方财富/新浪）｜ 回测框架：backtrader ｜ 仅用于学习演示")
+    st.caption("数据来源：akshare（东方财富/新浪/腾讯）｜ 回测框架：backtrader ｜ 仅用于学习演示")
 
 
 if __name__ == "__main__":

@@ -8,3 +8,5 @@ plotly==7.1.0
 backtrader==1.9.78.123
 streamlit==1.66.1
 numpy==2.5.4
+# phase5_ff3.py 的 Newey-West 回归依赖；漏掉会导致别人 clone 后跑三因子直接 ImportError
+statsmodels==0.15.0
