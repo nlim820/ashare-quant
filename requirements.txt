@@ -10,3 +10,5 @@ streamlit==1.66.1
 numpy==2.5.4
 # phase5_ff3.py 的 Newey-West 回归依赖；漏掉会导致别人 clone 后跑三因子直接 ImportError
 statsmodels==0.15.0
+# robust_stats.paired_t 的 t 分布 p 值依赖（statsmodels 也会带，但显式固定更稳）
+scipy==1.18.1

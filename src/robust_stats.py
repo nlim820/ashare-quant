@@ -18,12 +18,21 @@ import math
 
 import numpy as np
 import pandas as pd
+from scipy import stats as _st
 
 
-def paired_t(diff) -> tuple:
+def p_normal(t: float) -> float:
+    """正态近似双尾 p（仅供对照展示，**不要**用于 n<30 的显著性判断）。"""
+    return math.erfc(abs(t) / math.sqrt(2.0))
+
+
+def paired_t(diff, dist: str = "t") -> tuple:
     """单样本 t 检验（差值 vs 0）：返回 (均值, t, 双尾 p)。
 
-    p 用正态近似（erfc），大样本下与 t 分布几乎一致；小样本请自行查表。
+    p 默认用 **t 分布**（df=n-1）。这是 2026-11-03 的修订：旧版用正态近似
+    （erfc），在 n=20、t=3.18 时给出 p=0.0015，而 t(19) 下真值是 0.0049——
+    差 3 倍。小样本用正态近似会系统性低估 p 值（夸大显著性），论文里被按一下
+    计算器就露馅。dist="normal" 可退回旧行为，仅用于对照说明。
     """
     xs = np.asarray([v for v in diff if v == v], dtype=float)
     n = len(xs)
@@ -34,7 +43,14 @@ def paired_t(diff) -> tuple:
     if var <= 0:
         return float(mean), 0.0, 1.0
     t = mean / math.sqrt(var / n)
-    return float(mean), float(t), math.erfc(abs(t) / math.sqrt(2.0))
+    if dist == "normal":
+        return float(mean), float(t), p_normal(t)
+    return float(mean), float(t), float(2.0 * _st.t.sf(abs(t), df=n - 1))
+
+
+def p_value(t: float, df: float) -> float:
+    """按 t 分布算双尾 p；df 可为非整数（有效样本量修正后的 n_eff-1）。"""
+    return float(2.0 * _st.t.sf(abs(t), df=df))
 
 
 def effective_sample_size(returns: pd.DataFrame) -> tuple:

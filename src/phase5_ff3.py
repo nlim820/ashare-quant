@@ -83,7 +83,9 @@ def _collect(period: str) -> list:
     strat_series = {}   # 收集每只策略日收益，用于等权组合回归
     for s in SYMBOLS:
         if period == "IS":
-            r = run(s, IS_START, IS_END, FAST, SLOW, verbose=False, warmup=None)
+            # 与其他 20 只股票实验统一口径：240 天预热，评估窗口从 2020-12-29 起。
+            # 旧版 warmup=None（970 天窗口）与 phase3/6/7/8 不可比，2026-11-03 修订。
+            r = run(s, IS_START, IS_END, FAST, SLOW, verbose=False, warmup=240)
         else:
             r = run(s, OOS_START, OOS_END, FAST, SLOW, verbose=False, eval_start=OOS_EVAL)
         if r is None:
@@ -122,12 +124,16 @@ def _summarize(rows, label: str):
               f"{r['alpha_p']:>9.3f}{r['rsquared']:>8.2f}"
               + "".join(f"{r['betas'].get(f, float('nan')):>9.2f}" for f in facs)
               + f"  {flag}")
-        a_ann.append(r["alpha_ann"])
-        if r["alpha_p"] < 0.05:
-            sig += 1
-    n = len(rows)
+        # 等权组合不是独立观测，不计入「显著比例」的分母（否则 20 只个股的事
+        # 会被写成 21 项，分母不干净）。2026-11-03 修订。
+        if r["symbol"] != "组合(等权)":
+            a_ann.append(r["alpha_ann"])
+            if r["alpha_p"] < 0.05:
+                sig += 1
+    n = len(a_ann)
     print("-" * 78)
-    print(f"  样本：{n} 项 ｜ 年化α均值 {(np.mean(a_ann)*100):.2f}% ｜ "
+    print(f"  个股样本：{n} 只（等权组合单列显示，不入分母）｜ "
+          f"年化α均值 {(np.mean(a_ann)*100):.2f}% ｜ "
           f"α在5%显著的比例 {sig}/{n}（{(sig/n*100):.0f}%）")
     print(f"  → 若显著比例≈仅由随机波动造成（1/20=5%），则策略无稳定 alpha。")
     print("=" * 78)

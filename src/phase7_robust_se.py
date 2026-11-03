@@ -1,7 +1,8 @@
 """Phase 7：横截面相关性修正 —— 重估 Phase 3「回撤改善」的显著性。
 
 为什么必须做这一步（这是全项目最容易被一剑封喉的地方）：
-- Phase 3 用「20 只股票的配对 t 检验」得到 Δ最大回撤 t≈3.18、p≈0.001，
+- Phase 3 用「20 只股票的配对 t 检验」得到 Δ最大回撤 t≈3.18、p≈0.005（t 分布 df=19；
+  早期版本用正态近似报成 0.0015，小样本下低估 p，已改），
   前提是这 20 个配对差值【相互独立】。
 - 但 20 只 A 股大盘股同涨同跌：实测**策略日收益**平均相关系数约 0.18，
   按 n_eff = n / (1 + (n-1)·ρ̄) 折算，等效独立样本只有 ~4.5 只，不是 20 只。
@@ -13,7 +14,7 @@
   配对检验比的是策略指标的差值，所以必须用后者——不要拿前者吓自己也别用错。
 
 本脚本给三种口径，逐层收紧：
-  A. 朴素配对 t（复现 Phase 3 原结论，作为对照基线）
+  A. 朴素配对 t（复现 Phase 3 原结论，作为对照基线；p 用 t 分布 df=19）
   B. 有效样本量折算后的 t（把标准误乘 √(n/n_eff)，最保守的解析修正）
   C. 等权组合 + 分块 bootstrap（最稳健）：
      把 20 只合成 1 条组合日收益序列，"两只组合"（原版 vs 过滤版）逐日配对，
@@ -40,7 +41,8 @@ import pandas as pd
 
 from phase2_backtest import run
 from phase3_improve import SYMBOLS, FAST, SLOW, FILTER, WARMUP, START, END
-from robust_stats import paired_t, effective_sample_size, perf, block_bootstrap_delta
+from robust_stats import (paired_t, effective_sample_size, perf,
+                          block_bootstrap_delta, p_value, p_normal)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPORT_DIR = os.path.join(ROOT, "data", "reports")
@@ -129,18 +131,22 @@ def main() -> None:
     m_dd, t_dd, p_dd = paired_t(d_dd)
     m_sh, t_sh, p_sh = paired_t(d_sh)
     inflate = math.sqrt(n / n_eff)
-    t_dd_adj, p_dd_adj = t_dd / inflate, math.erfc(abs(t_dd / inflate) / math.sqrt(2.0))
-    t_ann_adj, p_ann_adj = t_ann / inflate, math.erfc(abs(t_ann / inflate) / math.sqrt(2.0))
+    # 口径 B 的参考分布：折算后 t 统计量按「有效样本」看待，df = n_eff - 1（≈3.5）。
+    # 旧版用正态近似（erfc），在 df 这么小时会严重低估 p；这是 2026-11-03 修订。
+    df_eff = max(n_eff - 1.0, 1.0)
+    t_dd_adj, p_dd_adj = t_dd / inflate, p_value(t_dd / inflate, df_eff)
+    t_ann_adj, p_ann_adj = t_ann / inflate, p_value(t_ann / inflate, df_eff)
 
     print("\n【2】口径 A：朴素配对 t（= Phase 3 原口径，作为对照基线）")
-    print(f"   Δ最大回撤 {m_dd*100:+6.2f} pp ｜ t={t_dd:5.2f} ｜ p={p_dd:.4f}"
+    print(f"   Δ最大回撤 {m_dd*100:+6.2f} pp ｜ t={t_dd:5.2f}（df={n-1}）｜ p={p_dd:.4f}"
           f"  {'显著' if p_dd < 0.05 else '不显著'}")
+    print(f"      （正态近似会给 p={p_normal(t_dd):.4f}，小样本下低估 p、夸大显著性，不采用）")
     print(f"   Δ年化     {m_ann*100:+6.2f} pp ｜ t={t_ann:5.2f} ｜ p={p_ann:.4f}"
           f"  {'显著' if p_ann < 0.05 else '不显著'}")
     print(f"   Δ夏普     {m_sh:+7.3f}     ｜ t={t_sh:5.2f} ｜ p={p_sh:.4f}")
 
     print("\n【3】口径 B：按有效样本量折算（解析修正，最保守）")
-    print(f"   调整后 t = t_朴素 / {inflate:.2f}")
+    print(f"   调整后 t = t_朴素 / {inflate:.2f}，参考分布 t(df={df_eff:.1f})")
     print(f"   Δ最大回撤 t={t_dd_adj:5.2f} ｜ p={p_dd_adj:.4f}"
           f"  {'显著' if p_dd_adj < 0.05 else '不显著'}")
     print(f"   Δ年化     t={t_ann_adj:5.2f} ｜ p={p_ann_adj:.4f}"
@@ -184,7 +190,7 @@ def main() -> None:
         print("    建议表述：「点估计上回撤改善，组合层面 bootstrap 支持该方向，")
         print("    但按有效样本量折算后显著性处于边界，结论对检验方法敏感」。")
     else:
-        print("  → 未能通过横截面修正后的检验。**不要**再写「p=0.001 统计显著」。")
+        print("  → 未能通过横截面修正后的检验。**不要**再写「朴素 p 显著，所以结论成立」。")
         print(f"    建议表述：「回撤点估计改善 {m_dd*100:.2f} pp（组合层面 "
               f"{((pf['maxdd']-pb['maxdd']))*100:+.2f} pp），但 {n} 只标的策略收益平均相关")
         print(f"    {rho:.2f}、等效独立样本仅约 {n_eff:.1f} 只，配对检验无法拒绝『无改善』，")

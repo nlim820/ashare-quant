@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 
 from phase2_backtest import run
-from robust_stats import paired_t, effective_sample_size
+from robust_stats import paired_t, effective_sample_size, p_value
 
 # 与 phase2_deepen 同一批 20 只跨行业大盘股，保证可比
 SYMBOLS = [
@@ -100,8 +100,11 @@ def main() -> None:
     rets = pd.DataFrame({s: b["strat_tr"] for s, b, f in rows}).dropna()
     rho, n_eff, n_sym = effective_sample_size(rets)
     inflate = math.sqrt(n_sym / n_eff) if n_eff > 0 else 1.0
-    p_dd_adj = math.erfc(abs(t_dd / inflate) / math.sqrt(2.0))
-    p_ann_adj = math.erfc(abs(t_ann / inflate) / math.sqrt(2.0))
+    # 折算后按 t 分布取 p，df = n_eff - 1（≈3.5）。旧版用正态近似，df 这么小时
+    # 会明显低估 p（0.130 vs 实际 ~0.20），2026-11-03 修订。
+    df_eff = max(n_eff - 1.0, 1.0)
+    p_dd_adj = p_value(t_dd / inflate, df_eff)
+    p_ann_adj = p_value(t_ann / inflate, df_eff)
 
     print("\n" + "=" * 78)
     print("均值对比（原版 → 过滤版）：")
@@ -115,7 +118,7 @@ def main() -> None:
     print("-" * 78)
     print(f"  横截面相关性修正：ρ̄={rho:.3f} ｜ 有效独立样本 n_eff≈{n_eff:.1f}/{n_sym} 只"
           f" ｜ 标准误需放大 {inflate:.2f} 倍")
-    print(f"  → 修正后 p：Δ回撤 {p_dd_adj:.3f}（朴素 {p_dd:.3f}）｜ "
+    print(f"  → 修正后 p（t 分布 df={df_eff:.1f}）：Δ回撤 {p_dd_adj:.3f}（朴素 {p_dd:.3f}）｜ "
           f"Δ年化 {p_ann_adj:.3f}（朴素 {p_ann:.3f}）")
     print("=" * 78)
 
