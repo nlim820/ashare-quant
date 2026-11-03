@@ -12,6 +12,7 @@
 """
 import math
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -296,6 +297,54 @@ class TestLotSizerIntegration(unittest.TestCase):
         r = run("600519", "20200101", "20231231", 5, 20, verbose=False)
         self.assertEqual(r["n_trades"], 28)
         self.assertAlmostEqual(r["strat_ann"], 0.1541, places=3)
+
+
+class TestAnimDemo(unittest.TestCase):
+    """内嵌动画的渲染契约。
+
+    为什么值得测：动画是"把规则可视化"的唯一入口，一旦占位符没替换干净，
+    页面上会直接露出一串 {{PRICE}}，比不显示更难看。这里锁三件事：
+    占位符全替换、数据长度一致、参数真的进了产物。
+    """
+
+    def _df(self, n=300, start="2020-01-02"):
+        return pd.DataFrame({
+            "日期": pd.date_range(start, periods=n, freq="B"),
+            "收盘": np.linspace(100, 200, n) + np.sin(np.arange(n) / 7),
+        })
+
+    def test_template_exists(self):
+        from anim_demo import TEMPLATE
+        self.assertTrue(TEMPLATE.exists(), f"模板缺失: {TEMPLATE}")
+
+    def test_all_placeholders_replaced(self):
+        from anim_demo import render
+        html = render(self._df(), "600519", "贵州茅台", 5, 20, 240)
+        self.assertNotIn("{{", html)
+        self.assertIn("贵州茅台", html)
+        self.assertIn("MA240", html)
+
+    def test_data_length_matches(self):
+        from anim_demo import render
+        n = 300
+        html = render(self._df(n), "600519", "", 5, 20, 240)
+        m = re.search(r"const price = \[(.*?)\];", html)
+        self.assertIsNotNone(m)
+        self.assertEqual(m.group(1).count(",") + 1, n)
+
+    def test_filter_period_is_injected(self):
+        """换成 120 日过滤线时，文案与常量都要跟着变（不能写死 240）。"""
+        from anim_demo import render
+        html = render(self._df(), "510300", "沪深300ETF", 10, 60, 120)
+        self.assertIn("MA120", html)
+        self.assertIn("FILTER=120", html)
+        self.assertIn("FAST=10, SLOW=60", html)
+        self.assertNotIn("240", html.split("const FAST")[1][:80])
+
+    def test_too_short_raises(self):
+        from anim_demo import render
+        with self.assertRaises(ValueError):
+            render(self._df(10), "600519", "", 5, 20, 240)
 
 
 if __name__ == "__main__":

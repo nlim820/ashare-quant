@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{TITLE}}</title>
+<style>
+  :root{
+    --price:#5ee0f0; --ma5:#f5b461; --ma20:#a78bfa; --filter:#6ee7c7;
+    --pass:#34d399; --death:#fb7185; --block:#f472b6;
+    --ink:#e2e8f0; --ink2:#94a3b8; --card:rgba(255,255,255,0.04);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; padding:22px 16px 30px; color:var(--ink);
+    font-family:"PingFang SC","Microsoft YaHei",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    background:
+      radial-gradient(1200px 600px at 15% -10%, rgba(110,231,199,0.10), transparent 60%),
+      radial-gradient(1000px 500px at 95% 0%, rgba(167,139,250,0.10), transparent 55%),
+      linear-gradient(165deg, #0f1524 0%, #0a0e18 60%, #080b13 100%);
+    background-attachment:fixed; min-height:100vh;
+  }
+  .wrap{max-width:940px;margin:0 auto;}
+  header h1{
+    font-size:21px;font-weight:600;margin:0 0 8px;letter-spacing:.5px;
+    background:linear-gradient(90deg,#5ee0f0,#a78bfa,#6ee7c7);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  header p{font-size:13px;color:var(--ink2);margin:0 0 16px;line-height:1.7;}
+  .ctrls{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px;}
+  .switch{display:inline-flex;align-items:center;gap:10px;cursor:pointer;
+    background:var(--card);border:1px solid rgba(255,255,255,0.08);
+    padding:9px 14px;border-radius:999px;font-size:14px;user-select:none;transition:.25s;}
+  .switch:hover{border-color:rgba(110,231,199,0.4);}
+  .switch input{display:none;}
+  .knob{width:38px;height:21px;border-radius:999px;background:rgba(255,255,255,0.15);
+    position:relative;transition:.3s;flex:none;}
+  .knob::after{content:"";position:absolute;top:2px;left:2px;width:17px;height:17px;
+    border-radius:50%;background:#fff;transition:.3s;}
+  .switch input:checked + .knob{background:linear-gradient(90deg,#34d399,#6ee7c7);}
+  .switch input:checked + .knob::after{transform:translateX(17px);}
+  button{font-family:inherit;font-size:14px;color:var(--ink);cursor:pointer;
+    border:1px solid rgba(255,255,255,0.12);background:var(--card);
+    padding:9px 18px;border-radius:999px;transition:.2s;}
+  button:hover{border-color:rgba(94,224,240,0.5);background:rgba(94,224,240,0.08);}
+  button:active{transform:scale(.96);}
+  .bubble{margin:0 0 14px;padding:13px 16px;border-radius:14px;font-size:14px;line-height:1.6;
+    background:var(--card);border:1px solid rgba(255,255,255,0.08);
+    border-left:4px solid var(--ink2);transition:.3s;min-height:22px;}
+  canvas{width:100%;height:auto;display:block;border-radius:16px;
+    border:1px solid rgba(255,255,255,0.08);
+    box-shadow:0 18px 50px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.05);}
+  .badges{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 6px;}
+  .badge{display:inline-flex;align-items:center;gap:7px;font-size:13px;
+    background:var(--card);border:1px solid rgba(255,255,255,0.08);
+    padding:8px 13px;border-radius:12px;}
+  .dot{width:9px;height:9px;border-radius:50%;flex:none;}
+  .legend{font-size:12.5px;color:var(--ink2);margin-top:16px;line-height:2;
+    display:flex;flex-wrap:wrap;gap:6px 18px;}
+  .legend span{display:inline-flex;align-items:center;gap:6px;}
+  .ln{width:16px;height:3px;border-radius:2px;display:inline-block;}
+  .ln.dash{background:repeating-linear-gradient(90deg,var(--filter) 0 5px,transparent 5px 9px);}
+  .note{font-size:12.5px;color:var(--ink2);margin-top:14px;line-height:1.7;
+    background:var(--card);border:1px solid rgba(255,255,255,0.07);
+    padding:11px 14px;border-radius:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>{{H1}}</h1>
+    <p>{{DESC}}</p>
+  </header>
+
+  <div class="ctrls">
+    <label class="switch">
+      <input type="checkbox" id="flt" checked>
+      <span class="knob"></span>
+      启用 {{FILTER}} 日均线安检门（门控式过滤）
+    </label>
+    <button id="pp">暂停</button>
+    <button id="rp">重播</button>
+  </div>
+
+  <div class="bubble" id="bubble">🌙 预热期：MA{{FILTER}} 尚未就绪（前段仅作训练），不交易</div>
+
+  <canvas id="cv" width="900" height="470"></canvas>
+
+  <div class="badges" id="badges"></div>
+
+  <div class="legend">
+    <span><i class="ln" style="background:var(--price)"></i>价格（真实）</span>
+    <span><i class="ln" style="background:var(--ma5)"></i>MA5 快线</span>
+    <span><i class="ln" style="background:var(--ma20)"></i>MA20 慢线</span>
+    <span><i class="ln dash"></i>MA{{FILTER}} 趋势线（安检基准）</span>
+    <span><i class="dot" style="background:var(--pass)"></i>金叉买入</span>
+    <span><i class="dot" style="background:var(--death)"></i>死叉清仓</span>
+    <span><i class="dot" style="background:var(--block)"></i>安检拦截</span>
+  </div>
+
+  <div class="note">{{NOTE}}</div>
+</div>
+
+<script>
+const price = {{PRICE}};
+const dates = {{DATES}};
+const N = price.length;
+const FAST={{FAST}}, SLOW={{SLOW}}, FILTER={{FILTER}}, DURATION={{DURATION}};
+
+function sma(arr,w,i){ if(i<w-1)return null; let s=0; for(let k=i-w+1;k<=i;k++)s+=arr[k]; return s/w; }
+const ma5=[],ma20=[],maf=[];
+for(let i=0;i<N;i++){ ma5.push(sma(price,FAST,i)); ma20.push(sma(price,SLOW,i)); maf.push(sma(price,FILTER,i)); }
+
+const crosses=[];
+for(let i=1;i<N;i++){
+  if(ma5[i-1]!=null && ma20[i-1]!=null){
+    if(ma5[i-1]<=ma20[i-1] && ma5[i]>ma20[i]) crosses.push({i,type:'gold'});
+    else if(ma5[i-1]>=ma20[i-1] && ma5[i]<ma20[i]) crosses.push({i,type:'death'});
+  }
+}
+
+const cv=document.getElementById('cv'), ctx=cv.getContext('2d');
+const dpr=Math.max(1, Math.min(3, window.devicePixelRatio||1));
+const W=900, H=470, L=48, R=16, T=18, B=54;
+cv.width=W*dpr; cv.height=H*dpr; cv.style.aspectRatio=W+'/'+H;
+ctx.scale(dpr,dpr);
+
+let allMin=Math.min(...price), allMax=Math.max(...price);
+for(const a of [ma5,ma20,maf]) for(const v of a) if(v!=null){ if(v<allMin)allMin=v; if(v>allMax)allMax=v; }
+allMin-=allMax*0.04; allMax+=allMax*0.04;
+const X=i=>L+(i/(N-1))*(W-L-R);
+const Y=v=>T+(1-(v-allMin)/(allMax-allMin))*(H-T-B);
+const HB_Y=H-B+18, HB_H=14;
+
+const stars=[]; { let s=2025; const r=()=>{s=(s*1103515245+12345)&0x7fffffff;return s/0x7fffffff;};
+  for(let k=0;k<46;k++) stars.push({x:r()*W,y:r()*(H-B),a:0.06+r()*0.10,r:0.5+r()*1.1}); }
+
+let progf=0, playing=true, last=0, raf=null;
+function useFlt(){ return document.getElementById('flt').checked; }
+
+function tracePath(arr,to){
+  const pts=[];
+  for(let i=0;i<=to;i++){ if(arr[i]!=null) pts.push([X(i),Y(arr[i])]); }
+  return pts;
+}
+function strokeGlow(pts,color,width,glow){
+  if(pts.length<2) return;
+  ctx.save();
+  ctx.shadowColor=color; ctx.shadowBlur=glow;
+  ctx.strokeStyle=color; ctx.lineWidth=width; ctx.lineJoin='round'; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(pts[0][0],pts[0][1]);
+  for(let k=1;k<pts.length;k++) ctx.lineTo(pts[k][0],pts[k][1]);
+  ctx.stroke(); ctx.restore();
+}
+function drawGrid(){
+  ctx.clearRect(0,0,W,H);
+  for(const s of stars){ ctx.fillStyle='rgba(255,255,255,'+s.a+')'; ctx.beginPath(); ctx.arc(s.x,s.y,s.r,0,Math.PI*2); ctx.fill(); }
+  ctx.strokeStyle='rgba(255,255,255,0.045)'; ctx.lineWidth=1;
+  for(let g=0;g<=4;g++){ const y=T+g/4*(H-T-B); ctx.beginPath(); ctx.moveTo(L,y); ctx.lineTo(W-R,y); ctx.stroke(); }
+  for(let g=0;g<=6;g++){ const x=L+g/6*(W-L-R); ctx.beginPath(); ctx.moveTo(x,T); ctx.lineTo(x,H-T-B); ctx.stroke(); }
+}
+function holdArray(){
+  const pos=new Array(N).fill(false), flt=useFlt(); let h=false, ci=0;
+  for(let i=0;i<N;i++){
+    while(ci<crosses.length && crosses[ci].i<=i){
+      const c=crosses[ci];
+      if(c.type==='gold'){ const passed=!flt||(maf[c.i]!=null&&price[c.i]>maf[c.i]); if(passed) h=true; }
+      else h=false;
+      ci++;
+    }
+    pos[i]=h;
+  }
+  return pos;
+}
+function drawHoldBar(pos){
+  ctx.fillStyle='rgba(255,255,255,0.10)'; ctx.fillRect(L,HB_Y,W-L-R,HB_H);
+  for(let i=0;i<=Math.floor(progf);i++){
+    if(!pos[i]) continue;
+    const x=X(i); ctx.fillStyle='rgba(52,211,153,0.34)';
+    ctx.fillRect(x,HB_Y,Math.max(1.4,(W-L-R)/(N-1)*1.2),HB_H);
+  }
+  ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.strokeRect(L,HB_Y,W-L-R,HB_H);
+}
+function markSignal(c,age){
+  const x=X(c.i), y=Y(price[c.i]);
+  if(c.type==='gold'){
+    const passed=!useFlt()||(maf[c.i]!=null&&price[c.i]>maf[c.i]);
+    if(passed){
+      const rr=Math.min(26, 5+age*6), al=Math.max(0,0.55-age*0.045);
+      ctx.save(); ctx.strokeStyle='rgba(52,211,153,'+al+')'; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.arc(x,y,rr,0,Math.PI*2); ctx.stroke(); ctx.restore();
+      ctx.save(); ctx.shadowColor='#34d399'; ctx.shadowBlur=12;
+      ctx.fillStyle='#34d399'; ctx.beginPath(); ctx.moveTo(x,y-16); ctx.lineTo(x-6,y-5); ctx.lineTo(x+6,y-5); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.arc(x,y,2.6,0,Math.PI*2); ctx.fill(); ctx.restore();
+    } else {
+      const al=Math.max(0.45, 0.95-age*0.05);
+      ctx.save(); ctx.strokeStyle='rgba(244,114,182,'+al+')'; ctx.lineWidth=2.4; ctx.lineCap='round';
+      ctx.shadowColor='#f472b6'; ctx.shadowBlur=8;
+      ctx.beginPath(); ctx.moveTo(x-6,y-12); ctx.lineTo(x+6,y-2); ctx.moveTo(x+6,y-12); ctx.lineTo(x-6,y-2); ctx.stroke();
+      ctx.restore();
+    }
+  } else {
+    const rr=Math.min(22, 4+age*5), al=Math.max(0,0.5-age*0.04);
+    ctx.save(); ctx.strokeStyle='rgba(251,113,133,'+al+')'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(x,y,rr,0,Math.PI*2); ctx.stroke(); ctx.restore();
+    ctx.save(); ctx.shadowColor='#fb7185'; ctx.shadowBlur=10; ctx.fillStyle='#fb7185';
+    ctx.beginPath(); ctx.moveTo(x,y+16); ctx.lineTo(x-6,y+5); ctx.lineTo(x+6,y+5); ctx.closePath(); ctx.fill(); ctx.restore();
+  }
+}
+function statusAndBubble(pos){
+  const prog=Math.floor(progf);
+  let st='', col='#94a3b8';
+  if(prog>=FILTER && maf[prog]!=null){
+    if(price[prog]>maf[prog]){ st='长期趋势向上 · 安检门开放（金叉将买入）'; col='#34d399'; }
+    else { st='长期趋势向下 · 安检门拦截（金叉被忽略）'; col='#f472b6'; }
+  } else { st='预热中 · MA{{FILTER}} 未就绪，不开仓'; col='#94a3b8'; }
+  ctx.fillStyle=col; ctx.font='600 13px "PingFang SC",system-ui,sans-serif'; ctx.textAlign='left';
+  ctx.fillText(st, L+4, T+13);
+  ctx.fillStyle='#94a3b8'; ctx.font='500 13px "PingFang SC",system-ui,sans-serif'; ctx.textAlign='right';
+  ctx.fillText((dates[prog]||''), W-R, T+13);
+
+  const b=document.getElementById('bubble');
+  let lastC=null; for(const c of crosses){ if(c.i<=prog) lastC=c; else break; }
+  const hold=pos[prog];
+  let txt, c2='var(--ink2)';
+  if(prog<FILTER){ txt='🌙 预热期（MA{{FILTER}} 未就绪）：前段仅作训练，不交易'; }
+  else if(!lastC){ txt='⚪ 空仓观望：等待下一个金叉'; }
+  else if(lastC.type==='gold'){
+    const passed=!useFlt()||(maf[lastC.i]!=null&&price[lastC.i]>maf[lastC.i]);
+    if(passed){ txt='🟢 '+lastC.i+' 金叉 + 趋势向上：安检门开放，已买入，持仓中'; c2='var(--pass)'; }
+    else { txt='🔴 '+lastC.i+' 金叉但趋势向下：安检门拦截，本次不开仓'; c2='var(--block)'; }
+  } else { txt='🟠 '+lastC.i+' 死叉：清仓离场（安检门不干预出场）'; c2='var(--death)'; }
+  b.textContent=txt; b.style.borderLeftColor=c2;
+
+  let pass=0,block=0,death=0;
+  for(const c of crosses){ if(c.i>prog) break;
+    if(c.type==='gold'){ const p=!useFlt()||(maf[c.i]!=null&&price[c.i]>maf[c.i]); if(p)pass++; else block++; }
+    else death++; }
+  document.getElementById('badges').innerHTML =
+    badge('#34d399', '金叉通过 '+pass) + badge('#f472b6','安检拦截 '+block) +
+    badge('#fb7185','死叉 '+death) + badge(hold?'#34d399':'#94a3b8','当前 '+(hold?'持仓':'空仓'));
+}
+function badge(c,t){ return '<span class="badge"><i class="dot" style="background:'+c+'"></i>'+t+'</span>'; }
+
+function draw(){
+  drawGrid();
+  const prog=Math.floor(progf);
+  const pp=tracePath(price,prog);
+  if(pp.length>1){
+    const g=ctx.createLinearGradient(L,0,W-R,0);
+    g.addColorStop(0,'#5ee0f0'); g.addColorStop(1,'#7fe9f5');
+    ctx.save(); ctx.shadowColor='#5ee0f0'; ctx.shadowBlur=10; ctx.strokeStyle=g; ctx.lineWidth=2.2;
+    ctx.lineJoin='round'; ctx.beginPath(); ctx.moveTo(pp[0][0],pp[0][1]);
+    for(let k=1;k<pp.length;k++) ctx.lineTo(pp[k][0],pp[k][1]); ctx.stroke(); ctx.restore();
+  }
+  strokeGlow(tracePath(ma5,prog), '#f5b461', 1.6, 6);
+  strokeGlow(tracePath(ma20,prog),'#a78bfa', 1.6, 6);
+  const mpts=tracePath(maf,prog);
+  if(mpts.length>1){
+    ctx.save(); ctx.setLineDash([7,6]); ctx.shadowColor='#6ee7c7'; ctx.shadowBlur=6;
+    ctx.strokeStyle='#6ee7c7'; ctx.lineWidth=1.7; ctx.lineJoin='round';
+    ctx.beginPath(); ctx.moveTo(mpts[0][0],mpts[0][1]);
+    for(let k=1;k<mpts.length;k++) ctx.lineTo(mpts[k][0],mpts[k][1]); ctx.stroke(); ctx.restore();
+  }
+  const pos=holdArray();
+  drawHoldBar(pos);
+  for(const c of crosses){ if(c.i<=prog) markSignal(c, progf-c.i); }
+  if(prog>0){ const x=X(prog),y=Y(price[prog]), t=Date.now()/400;
+    ctx.save(); ctx.fillStyle='rgba(94,224,240,'+(0.25+0.15*Math.sin(t))+')';
+    ctx.beginPath(); ctx.arc(x,y,4+1.5*Math.sin(t),0,Math.PI*2); ctx.fill(); ctx.restore(); }
+  statusAndBubble(pos);
+}
+
+function loop(ts){
+  if(!last) last=ts;
+  const dt=(ts-last)/1000; last=ts;
+  if(playing){
+    progf += (N-1)/DURATION * dt;
+    if(progf>=N-1){ progf=N-1; playing=false; document.getElementById('pp').textContent='播放'; }
+  }
+  draw();
+  raf=requestAnimationFrame(loop);
+}
+function play(){ if(!playing){ playing=true; last=0; document.getElementById('pp').textContent='暂停'; } }
+function pause(){ playing=false; document.getElementById('pp').textContent='播放'; }
+function togglePP(){ playing?pause():play(); }
+function replay(){ progf=0; last=0; play(); }
+
+document.getElementById('pp').onclick=togglePP;
+document.getElementById('rp').onclick=replay;
+document.getElementById('flt').addEventListener('change', draw);
+raf=requestAnimationFrame(loop);
+</script>
+<div style="position:fixed;right:8px;bottom:6px;font-size:11px;color:rgba(180,200,230,0.55);pointer-events:none;z-index:9;font-family:sans-serif">小陆 · 个人项目（独立完成）</div>
+</body>
+</html>

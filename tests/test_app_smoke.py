@@ -79,6 +79,24 @@ class TestAppSmoke(unittest.TestCase):
         self.assertIn("策略年化收益", labels)
         self.assertIn("策略最大回撤", labels)
 
+    def test_anim_toggle_renders_iframe(self):
+        """侧栏「动画演示」开关打开后，必须真的渲染出一个 iframe 且不报错。
+
+        动画走 st.iframe（内嵌 HTML 字符串），一旦 API 改名或模板占位符
+        没替换干净，页面上会白块或露出 {{PRICE}}，而单元测试看不到——
+        所以这里断言"元素真的进了页面树"。
+        """
+        at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=240)
+        at.run()
+        boxes = [c for c in at.checkbox if "动画" in c.label]
+        self.assertTrue(boxes, "侧栏应已加上「动画演示」开关")
+        boxes[0].set_value(True)
+        at.run()
+        self.assertEqual(len(at.exception), 0, [e.value for e in at.exception])
+        self.assertEqual(len(at.get("iframe")), 1, "开关打开后应有且仅有 1 个 iframe")
+        self.assertTrue(any("双均线「安检门」动画" in e.label for e in at.expander),
+                        [e.label for e in at.expander])
+
     def test_etf_seed_files_present(self):
         """ETF 种子缓存必须在仓库里（.gitignore 是白名单制，漏加就线上无缓存）。"""
         import pandas as pd

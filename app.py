@@ -26,6 +26,7 @@ import plotly.graph_objects as go
 from data_utils import get_price, add_ma, is_fund, get_meta
 from viz import kline_figure
 from phase2_backtest import run as backtest_run
+from anim_demo import render as render_anim
 
 # —— 署名信息：只在这里定义，页面三处（标题下 / 侧栏底部 / 页脚）统一引用 ——
 # 换真名或换账号时只改这一段，避免改漏导致前后不一致。
@@ -141,6 +142,17 @@ def main():
             if filter_ma <= slow:
                 st.warning("过滤线周期需大于慢线周期，否则覆盖不住慢线。")
 
+        # 动画演示（自包含渲染，不依赖任何外部网址）
+        st.divider()
+        st.subheader("🎬 动画演示")
+        show_anim = st.checkbox(
+            "在页面内播放双均线动画", value=False,
+            help="把当前标的的真实行情做成动画：金叉买入、死叉清仓，以及长期均线"
+                 "「安检门」如何拦掉下跌段的假金叉。动画由本页现场渲染（纯本地 "
+                 "HTML/Canvas），不请求任何外部网址，也可暂停/重播。")
+        if show_anim:
+            st.caption("跟随当前标的与快慢线；安检门用长期均线（默认 240 日）。")
+
         # 可执行性（默认关闭 = 与论文/简历口径一致）
         st.divider()
         with st.expander("可执行性设置（默认关闭）"):
@@ -193,6 +205,8 @@ def main():
     raw = raw.copy()
     raw["日期"] = pd.to_datetime(raw["日期"])
     raw = raw.sort_values("日期").set_index("日期")
+    # 动画要用完整序列（含长均线预热段），所以留一份 dropna 之前的
+    raw_for_anim = raw.reset_index().copy()
     ma_windows = (fast, slow) + ((filter_ma,) if filter_ma else ())
     raw = add_ma(raw, windows=ma_windows).dropna(subset=[f"MA{fast}", f"MA{slow}"])
     if len(raw) < 30:
@@ -213,6 +227,27 @@ def main():
                    "收益与回撤会与复权口径存在偏差。")
     elif raw.attrs.get("adjust_note") == "stale_cache":
         st.info("ℹ️ 本次使用本地旧缓存（刷新失败），数据可能不是最新。")
+
+    # —— 1.5) 双均线动画（可选）——
+    # 放在 K 线之前：先让人看懂"策略在做什么"，再看原始数据。
+    if show_anim:
+        # 手动输入代码时，下拉框的标的简称就与 symbol 不符了，此时不要带上名字
+        _name = ""
+        if PRESETS.get(choice) == symbol and " " in choice:
+            _name = choice.split(" ", 1)[1].replace("（基金）", "")
+        with st.expander("🎬 双均线「安检门」动画 · 可暂停/重播", expanded=True):
+            st.caption("画面由本页**现场渲染**（纯本地 HTML/Canvas，零外部请求），"
+                       "所以不会因为临时托管过期而变成死链；标的与快慢线跟随左侧设置。")
+            try:
+                _html = render_anim(raw_for_anim, symbol, name=_name,
+                                    fast=fast, slow=slow,
+                                    filter_ma=filter_ma or 240, adjust=adjust)
+                # st.iframe 取代已弃用的 st.components.v1.html
+                #（后者官方标注 2026-06-01 后移除，而本项目线上跑的是新版 Streamlit）。
+                # 高度按实测内容给足：不够的话底部说明会被裁掉。
+                st.iframe(_html, height=990)
+            except Exception as _e:  # 动画坏了不能拖垮主流程
+                st.info(f"动画渲染失败（{type(_e).__name__}）：{_e}。不影响下面的 K 线与回测。")
 
     st.subheader(f"📊 K线 + 均线（MA{fast}/MA{slow}）")
     fig = kline_figure(raw.reset_index(), symbol, fast, slow, filter_ma=filter_ma)
