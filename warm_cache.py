@@ -12,12 +12,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 from data_utils import get_price, get_index  # noqa: E402
 
-# 与 phase2_deepen / phase3_improve 同一批 20 只跨行业大盘股 + 沪深300ETF(510300)
+# 与 phase2_deepen / phase3_improve 同一批 20 只跨行业大盘股 + 网页预置的 3 只场内 ETF
 SYMBOLS = [
     "600519", "000001", "600036", "000651", "000333", "600276", "601318", "600900",
     "600030", "601166", "600887", "000858", "601888", "300750", "002594", "000002",
     "601398", "002415", "600585", "601857",
-    "510300",
+    "510300", "510500", "159915",
 ]
 INDEX_SYMBOL = "sh000300"
 LATEST_END = "20261101"   # 预热到最新交易日附近（2026-10-30 为当前最新交易日）

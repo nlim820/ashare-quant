@@ -34,8 +34,10 @@ GITHUB_USER = "nlim820"
 GITHUB_PROFILE = f"https://github.com/{GITHUB_USER}"
 GITHUB_REPO = f"{GITHUB_PROFILE}/ashare-quant"
 
-# 预置股票池（展示用，覆盖多个行业），也可在侧栏手动输入其他代码
-PRESETS = {
+# 预置标的池：个股 + 场内 ETF 分组维护，侧栏按「个股在前、基金在后」展示。
+# ETF 的种子缓存是**腾讯源前复权**快照（data/raw/{code}_20200101_20231231_qfq.csv）；
+# 不要用东财限流后的新浪回退数据当种子——那是不复权的，收益率会少掉分红部分。
+PRESET_STOCKS = {
     "600519 贵州茅台": "600519",
     "000001 平安银行": "000001",
     "600036 招商银行": "600036",
@@ -45,6 +47,14 @@ PRESETS = {
     "601318 中国平安": "601318",
     "600900 长江电力": "600900",
 }
+
+PRESET_FUNDS = {
+    "510300 沪深300ETF（基金）": "510300",
+    "510500 中证500ETF（基金）": "510500",
+    "159915 创业板ETF（基金）": "159915",
+}
+
+PRESETS = {**PRESET_STOCKS, **PRESET_FUNDS}
 
 # 数据源选择映射（侧栏显示名 → get_price 的 source 参数）
 SOURCE_LABELS = {
@@ -86,9 +96,9 @@ def run_backtest(symbol, start, end, fast, slow, adjust="qfq", source="auto",
 
 def main():
     # page_title 会显示在浏览器标签页与分享卡片上，带上作者名便于他人转发时识别
-    st.set_page_config(page_title=f"A股量化分析 Demo ｜ {AUTHOR}", layout="wide")
-    st.title("📈 A股量化分析 Demo")
-    st.caption("数据获取 · K线可视化 · 双均线策略回测")
+    st.set_page_config(page_title=f"A股/基金量化分析 Demo ｜ {AUTHOR}", layout="wide")
+    st.title("📈 A股/基金量化分析 Demo")
+    st.caption("数据获取 · K线可视化 · 双均线策略回测 ｜ 支持 A股个股与场内 ETF")
     # 作者署名放在正文第一屏：手机端侧栏默认折叠，只放侧栏等于没有
     st.caption(f"👤 作者：{AUTHOR}　｜　GitHub [@{GITHUB_USER}]({GITHUB_PROFILE})"
                f"　｜　源码 [{GITHUB_USER}/ashare-quant]({GITHUB_REPO})")
@@ -96,8 +106,10 @@ def main():
     # —— 侧栏参数 ——
     with st.sidebar:
         st.header("⚙️ 参数设置")
-        choice = st.selectbox("选择股票", list(PRESETS.keys()))
+        choice = st.selectbox("选择标的", list(PRESETS.keys()))
         symbol = PRESETS[choice]
+        st.caption(f"已预置 {len(PRESET_STOCKS)} 只个股 + {len(PRESET_FUNDS)} 只场内 ETF"
+                   "（ETF 为前复权种子快照，含分红调整）")
         custom = st.text_input("或手动输入代码（A股6位 / ETF基金6位，如 510300）", "")
         if custom.strip():
             symbol = custom.strip()

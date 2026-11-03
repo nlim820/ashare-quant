@@ -151,11 +151,16 @@ def _fund_sina_symbol(symbol: str) -> str:
 def fund_fetch(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.DataFrame:
     """拉取单只场内基金（ETF/LOF）日线行情，返回与股票同构的 DataFrame。
 
-    优先东方财富（支持 qfq 前复权 + 起止日期）；若被限流，自动切换新浪。
-    **重要限制**：新浪基金接口（fund_etf_hist_sina）只返回【不复权】全量数据，
-    这里按日期切片仅作限流兜底。一旦回退，除权除息会造成历史价格跳空、
-    收益被系统性低估。为让下游【看得见】这件事，返回值会在 df.attrs 里
-    标记 adjust_note="sina_noadj" 并通过 source_used 说明实际数据源。
+    回退链：东方财富（qfq/hfq + 起止日期）→ **腾讯**（同样支持 ETF 的 qfq/hfq）
+    → 新浪（最后兜底）。
+
+    为什么中间要插腾讯（2026-11-03 改）：原来东财限流就直奔新浪，而新浪基金接口
+    只返回【不复权】全量数据——历史价格在除权日跳空、收益被系统性低估，且早期版本
+    还把它写进了 `_qfq.csv` 缓存（见 `_cache_writable` 的说明）。腾讯能给出真正
+    前复权的 ETF 日线，接在中间既保住口径、也让缓存可安全落盘。
+
+    只有腾讯也不可用时才会退到新浪，此时在 df.attrs 标 adjust_note="sina_noadj"，
+    并通过 source_used 说明实际数据源，供页面/论文显示警示。
     """
     try:
         df = ak.fund_etf_hist_em(
@@ -164,7 +169,16 @@ def fund_fetch(symbol: str, start: str, end: str, adjust: str = "qfq") -> pd.Dat
         )
         used, note = "em", ""
     except Push2RateLimitError:
-        print("   ⚠️ 东方财富基金接口被限流，自动切换新浪数据源（该源不复权）...")
+        print("   ⚠️ 东方财富基金接口被限流，改走腾讯源（支持 ETF 前复权）...")
+        try:
+            out = fetch_tx(symbol, start, end, adjust)   # 定义在本文件下方，运行时可用
+            if out is not None and len(out) > 0:
+                out.attrs["source_used"] = "tx"
+                out.attrs["adjust_note"] = ""
+                return out
+        except Exception as e:
+            print(f"   ⚠️ 腾讯源也不可用（{type(e).__name__}）...")
+        print("   ⚠️ 最后回退新浪数据源（该源不复权，收益会系统性偏低）...")
         raw = ak.fund_etf_hist_sina(symbol=_fund_sina_symbol(symbol))
         raw = raw.rename(columns={k: v for k, v in _RENAME.items() if k in raw.columns})
         raw["日期"] = pd.to_datetime(raw["日期"])
@@ -259,6 +273,24 @@ def _read_meta(path: Path) -> dict | None:
             return json.load(f)
     except Exception:
         return None
+
+
+def _cache_writable(path: Path, df: pd.DataFrame) -> bool:
+    """判断这份数据能否安全写入缓存文件。
+
+    背景（2026-11-03 修的真实 bug）：ETF 取数走东财基金接口，限流时会自动
+    回退到新浪，而新浪那份是**不复权**的，只在 attrs 里标了 adjust_note。
+    早期版本不检查这个标记，直接把不复权数据写进了 `_qfq.csv`，于是：
+    文件名声称前复权、内容是原始价，而且读取时走缓存分支、不再触发任何告警。
+    实测 510300 的旧种子文件与新浪不复权数据比值恒为 1.000000，总收益
+    −15.67%，而真实前复权（含分红）为 −12.00%，低了 3.7pp 且无人察觉。
+
+    所以：不复权的回退数据一律不写 qfq 缓存——宁可每次重试联网，也不留毒。
+    """
+    if df.attrs.get("adjust_note") == "sina_noadj" and path.stem.endswith("_qfq"):
+        print("   ⚠️ 本次为不复权的回退数据，跳过写缓存（不污染 qfq 缓存文件）")
+        return False
+    return True
 
 
 def _write_meta(path: Path, df: pd.DataFrame, source: str, symbol: str) -> dict:
@@ -359,9 +391,12 @@ def get_price(symbol: str, start: str, end: str, adjust: str = "qfq",
         try:
             df = _download(symbol, start, end, adjust, source)
             df.attrs["adjust"] = adjust
-            df.to_csv(path, index=False, encoding="utf-8-sig")
-            meta = _write_meta(path, df, source, symbol)
-            df = _attach_attrs(df, meta, source)
+            if _cache_writable(path, df):
+                df.to_csv(path, index=False, encoding="utf-8-sig")
+                meta = _write_meta(path, df, source, symbol)
+                df = _attach_attrs(df, meta, source)
+            # 未写盘时保留 df 原有 attrs（含 adjust_note="sina_noadj"），
+            # 让页面照常提示「该源不复权」——不能用空 meta 把它覆盖掉
             if validate:
                 for msg in check_quality(df, symbol):
                     print(f"   ⚠️ 数据质量：{msg}")
@@ -375,9 +410,10 @@ def get_price(symbol: str, start: str, end: str, adjust: str = "qfq",
 
     df = _download(symbol, start, end, adjust, source)
     df.attrs["adjust"] = adjust
-    df.to_csv(path, index=False, encoding="utf-8-sig")
-    meta = _write_meta(path, df, source, symbol)
-    df = _attach_attrs(df, meta, source)
+    if _cache_writable(path, df):
+        df.to_csv(path, index=False, encoding="utf-8-sig")
+        meta = _write_meta(path, df, source, symbol)
+        df = _attach_attrs(df, meta, source)
     if validate:
         for msg in check_quality(df, symbol):
             print(f"   ⚠️ 数据质量：{msg}")

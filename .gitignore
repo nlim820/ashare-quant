@@ -23,6 +23,8 @@ data/reports/
 !data/raw/601318_20200101_20231231_qfq.csv
 !data/raw/600900_20200101_20231231_qfq.csv
 !data/raw/510300_20200101_20231231_qfq.csv
+!data/raw/510500_20200101_20231231_qfq.csv
+!data/raw/159915_20200101_20231231_qfq.csv
 !data/raw/300750_20200101_20231231_qfq.csv
 !data/raw/002594_20200101_20231231_qfq.csv
 # 例外：沪深300 指数缓存（20KB），入库后 Cloud 上 Beta/Alpha 才能算出来，否则该板块会静默消失

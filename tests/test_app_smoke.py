@@ -59,6 +59,36 @@ class TestAppSmoke(unittest.TestCase):
         self.assertTrue(any("日期格式" in e.value for e in at.error),
                         [e.value for e in at.error])
 
+    def test_etf_preset_renders(self):
+        """ETF 预置项必须能端到端跑通。
+
+        为什么单列一条：ETF 走的是与个股不同的取数通道（东财基金接口 /
+        腾讯 ETF 分支），历史上曾因东财限流回退新浪，把**不复权**数据
+        存成了 _qfq.csv 种子（510300 因此少算 3.7pp 收益且无人察觉）。
+        这条测试至少保证「换成 ETF 不会白屏、指标能出来」。
+        """
+        at = AppTest.from_file(str(ROOT / "app.py"), default_timeout=240)
+        at.run()
+        etf_opts = [o for o in at.selectbox[0].options if "ETF" in o]
+        self.assertTrue(etf_opts, "预置池里必须包含 ETF 标的")
+        at.selectbox[0].set_value(etf_opts[0])
+        at.run()
+        self.assertEqual(len(at.exception), 0, [e.value for e in at.exception])
+        self.assertEqual(len(at.error), 0, [e.value for e in at.error])
+        labels = {m.label: m.value for m in at.metric}
+        self.assertIn("策略年化收益", labels)
+        self.assertIn("策略最大回撤", labels)
+
+    def test_etf_seed_files_present(self):
+        """ETF 种子缓存必须在仓库里（.gitignore 是白名单制，漏加就线上无缓存）。"""
+        import pandas as pd
+        for code in ("510300", "510500", "159915"):
+            p = ROOT / f"data/raw/{code}_20200101_20231231_qfq.csv"
+            self.assertTrue(p.exists(), f"缺少 ETF 种子 {p.name}（检查 .gitignore 白名单）")
+            df = pd.read_csv(p)
+            self.assertGreater(len(df), 900, f"{p.name} 只有 {len(df)} 行，数据不完整")
+            self.assertIn("收盘", df.columns)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

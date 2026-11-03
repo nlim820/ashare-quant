@@ -25,7 +25,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 import backtrader as bt
 
-from data_utils import check_quality, is_fund, add_ma, _write_meta, _read_meta, _is_stale
+from data_utils import (check_quality, is_fund, add_ma, _write_meta, _read_meta,
+                        _is_stale, _cache_writable)
 from phase2_backtest import (compute_metrics, _ols_alpha, RealisticCommInfo,
                              STAMP_TAX_CUT, STAMP_TAX_OLD, STAMP_TAX_NEW, run)
 from robust_stats import (paired_t, effective_sample_size, max_drawdown, perf,
@@ -228,6 +229,25 @@ class TestCacheMeta(unittest.TestCase):
     def test_missing_meta_returns_none(self):
         with tempfile.TemporaryDirectory() as td:
             self.assertIsNone(_read_meta(Path(td) / "nope.csv"))
+
+    def test_noadj_never_poisons_qfq_cache(self):
+        """不复权的回退数据禁止写入 qfq 缓存文件。
+
+        真实 bug（2026-11-03 发现）：ETF 取数走东财基金接口，限流时回退新浪，
+        而新浪那份不复权。旧版不检查 adjust_note，直接把原始价写进
+        `_qfq.csv`，于是文件名声称前复权、内容是原始价，且读缓存时不再告警。
+        实测 510300 旧种子与新浪不复权比值恒为 1.000000，三年总收益少算 3.7pp。
+        """
+        df = pd.DataFrame({"收盘": [1.0, 2.0]})
+        qfq_path = Path("510300_20200101_20231231_qfq.csv")
+
+        df.attrs["adjust_note"] = "sina_noadj"
+        self.assertFalse(_cache_writable(qfq_path, df), "不复权数据不得写入 qfq 缓存")
+        # 显式请求新浪源（文件名带 _sina 后缀）时允许写，因为不会污染 qfq
+        self.assertTrue(_cache_writable(Path("510300_qfq_sina.csv"), df))
+
+        df.attrs["adjust_note"] = ""
+        self.assertTrue(_cache_writable(qfq_path, df), "正常的复权数据应可写盘")
 
 
 class TestOLSAlpha(unittest.TestCase):
