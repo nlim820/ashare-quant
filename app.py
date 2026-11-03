@@ -27,6 +27,13 @@ from data_utils import get_price, add_ma, is_fund, get_meta
 from viz import kline_figure
 from phase2_backtest import run as backtest_run
 
+# —— 署名信息：只在这里定义，页面三处（标题下 / 侧栏底部 / 页脚）统一引用 ——
+# 换真名或换账号时只改这一段，避免改漏导致前后不一致。
+AUTHOR = "小陆"
+GITHUB_USER = "nlim820"
+GITHUB_PROFILE = f"https://github.com/{GITHUB_USER}"
+GITHUB_REPO = f"{GITHUB_PROFILE}/ashare-quant"
+
 # 预置股票池（展示用，覆盖多个行业），也可在侧栏手动输入其他代码
 PRESETS = {
     "600519 贵州茅台": "600519",
@@ -78,9 +85,13 @@ def run_backtest(symbol, start, end, fast, slow, adjust="qfq", source="auto",
 
 
 def main():
-    st.set_page_config(page_title="A股量化分析 Demo", layout="wide")
+    # page_title 会显示在浏览器标签页与分享卡片上，带上作者名便于他人转发时识别
+    st.set_page_config(page_title=f"A股量化分析 Demo ｜ {AUTHOR}", layout="wide")
     st.title("📈 A股量化分析 Demo")
-    st.caption("数据获取 · K线可视化 · 双均线策略回测 ｜ 面向简历的增量项目")
+    st.caption("数据获取 · K线可视化 · 双均线策略回测")
+    # 作者署名放在正文第一屏：手机端侧栏默认折叠，只放侧栏等于没有
+    st.caption(f"👤 作者：{AUTHOR}　｜　GitHub [@{GITHUB_USER}]({GITHUB_PROFILE})"
+               f"　｜　源码 [{GITHUB_USER}/ashare-quant]({GITHUB_REPO})")
 
     # —— 侧栏参数 ——
     with st.sidebar:
@@ -130,6 +141,10 @@ def main():
             use_real_cost = st.checkbox("计入真实成本（滑点+印花税+过户费）", value=False)
         lot_size = 100 if use_lot else None
         cost_model = "realistic" if use_real_cost else "simple"
+
+        # 侧栏底部再放一次署名（桌面端常驻可见；手机端折叠，故正文另有署名）
+        st.divider()
+        st.caption(f"👤 {AUTHOR}　｜　GitHub [@{GITHUB_USER}]({GITHUB_PROFILE})")
 
     # —— 输入校验（早失败、给明确提示，而不是抛未捕获异常）——
     if not re.fullmatch(r"\d{6}", symbol):
@@ -285,7 +300,10 @@ def main():
         st.plotly_chart(eq_fig, width="stretch")
 
     st.divider()
-    st.caption("数据来源：akshare（东方财富/新浪/腾讯）｜ 回测框架：backtrader ｜ 仅用于学习演示")
+    st.caption("数据来源：akshare（东方财富/新浪/腾讯）｜ 回测框架：backtrader ｜ 仅用于学习演示，不构成投资建议")
+    st.caption(f"作者：{AUTHOR}（GitHub [@{GITHUB_USER}]({GITHUB_PROFILE})）"
+               f"　｜　源码：[{GITHUB_USER}/ashare-quant]({GITHUB_REPO})"
+               f"　｜　如发现口径错误或数字无法复现，欢迎在仓库提 Issue。")
 
 
 if __name__ == "__main__":
